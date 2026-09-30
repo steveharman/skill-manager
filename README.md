@@ -6,14 +6,33 @@ and switch installed plugins on and off.
 
 ```text
 $ skm list
-NAME        SCOPE    STATUS    SOURCE                               DESCRIPTION
-pdf         user     enabled   github:anthropics/skills/skills/pdf  Use this skill whenever the user wants to…
-route       user     enabled   —                                    Route a task to the right Claude model…
-deploy      project  disabled  local                                Deploy the app to staging…
+NAME        SCOPE     STATUS    SOURCE                               DESCRIPTION
+pdf         user      enabled   github:anthropics/skills/skills/pdf  Use this skill whenever the user wants to…
+route       user      enabled   —                                    Route a task to the right Claude model…
+deploy      ~/myapp   disabled  local                                Deploy the app to staging…
 
 3 skills · 2 enabled · 1 disabled
 user    ~/.claude/skills
 project ./.claude/skills
+```
+
+SCOPE says where something is installed: `user`, `synced` (claude.ai plugins), or the project's path
+(e.g. `~/myapp`) for project scope. STATUS only ever says whether it is on: `enabled` or `disabled`,
+plus qualifiers such as `shadowed`, `off (settings)` or `disabled (plugin off)`. Long project paths
+are shortened from the left (`…/infra/health-worker`). `--json` keeps `scope: "project"` and puts the
+path in a separate `projectPath` field.
+
+```text
+$ skm plugin list
+PLUGIN                               SCOPE                         STATUS    SKILLS  VERSION  DECIDED BY
+caveman@caveman                      user                          enabled   5       84cc3c1  ~/.claude/settings.json: true
+cloudflare@cloudflare                ~/pikkos/infra/health-worker  enabled   8       1.0.0    default (defaultEnabled: true)
+revenuecat@claude-plugins-official   ~/carememo                    enabled   18      2.2.1    ~/carememo/.claude/settings.json: true
+superpowers@claude-plugins-official  user                          disabled  15      6.4.1    ~/.claude/settings.json: false
+token-optimizer-cowork@synced        synced                        enabled   5       0006     default (defaultEnabled: true; …)
+
+5 plugins · 2 enabled · 1 disabled · 2 installed for other projects
+dimmed: installed for another project — loads only when Claude Code runs there
 ```
 
 ## Install
@@ -165,8 +184,12 @@ in its settings files, not from `installed_plugins.json`. `skm` reads it the sam
 - **Plugins synced from claude.ai** show up as `<name>@synced` (scope `synced`). They load only in
   sessions signed in with your claude.ai account, and `syncClaudeAiPlugins: false` turns them all off.
 - **Plugins installed for another project** (install scope `project`/`local` with a different
-  project path) are listed as `project-only (<path>)`. Their status there comes from that project's
-  settings files.
+  project path) show that project's path in SCOPE (a `local` install adds ` (local)`) and are dimmed,
+  with a legend line under the table. Their STATUS is still `enabled`/`disabled`: what Claude Code
+  decides when it runs in *that* project (user settings → that project's `.claude/settings.json` →
+  its `.claude/settings.local.json` → managed), and DECIDED BY names that project's file. The
+  summary line counts them separately (`… · 2 installed for other projects`), and `--json` has
+  `loadsHere: false` for them.
 - **Single plugin skills can't be switched.** Claude Code's `skillOverrides` doesn't apply to plugin
   skills, so `skm enable/disable plugin:skill` explains this and points at `skm plugin disable <plugin>`.
 - Two marketplaces that ship the same plugin name are two separate plugins. `skm plugin disable
@@ -176,9 +199,11 @@ In the interactive menu, **Enable / disable plugins** is a checklist of the plug
 A change goes to user settings, or to `.claude/settings.local.json` when a project file currently
 decides that plugin (so nothing committed changes).
 
-Status words in `skm list --plugins` / `--all`: `enabled`, `disabled (plugin off)`,
-`project-only (<path>)`. By default only skills of enabled plugins are listed, followed by a line such
-as `+ 42 skills from 4 disabled plugins hidden (use --all)`.
+In `skm list --plugins` / `--all`, a plugin skill's SCOPE is where its plugin is installed (`user`,
+`synced` or a project path; SOURCE names the plugin) and its STATUS is `enabled` or
+`disabled (plugin off)`. By default only skills of plugins that load here are listed, followed by
+lines such as `+ 42 skills from 4 disabled plugins hidden (use --all)` and
+`+ 23 skills from 2 plugins installed for other projects hidden (use --all)`.
 
 `skm plugin enable/disable` writes one key and leaves everything else alone: it keeps every other
 key and their order, writes 2-space JSON (or the file's existing indent) with a trailing newline,

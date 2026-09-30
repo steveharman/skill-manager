@@ -2,24 +2,23 @@ import { join } from 'node:path';
 import pc from 'picocolors';
 import { selectedScopes } from '../context.js';
 import { dirSize, listFiles } from '../fsutil.js';
+import { loadsHere } from '../plugins.js';
 import { collect, resolveSkill, scanPlugins } from '../skills.js';
 import { sourceLabel } from '../state.js';
-import { formatBytes, out, plural, scopeColor, table, tildify } from '../ui.js';
+import { OTHER_PROJECT_LEGEND, entryScope, entryScopeLabel, formatBytes, out, plural, table, tildify } from '../ui.js';
 
 /** Keep the end of long sources (the interesting part). */
 const clip = (s, n) => (s.length > n ? '…' + s.slice(s.length - n + 1) : s);
 
-/** Status of a plugin skill's plugin in words, e.g. "project-only (~/app)". */
-export function pluginStateText(state, projectPath) {
-  if (state === 'project-only') return `project-only (${tildify(projectPath)})`;
-  return state === 'disabled' ? 'disabled (plugin off)' : 'enabled';
-}
+/** A plugin skill whose plugin is installed for another project (it never loads where skm runs). */
+const otherProject = (e) => e.scope === 'plugin' && e.pluginInfo && !e.pluginInfo.applicable;
 
+/** STATUS is only ever on/off (plus qualifiers about on/off); where a skill lives belongs in SCOPE. */
 function statusText(e) {
   if (e.kind === 'not-skill') return pc.dim('not a skill');
   if (e.kind === 'broken-link') return pc.red('broken link');
-  if (e.scope === 'plugin' && e.pluginState === 'project-only') return pc.dim(pluginStateText('project-only', e.pluginInfo.projectPath));
-  if (e.scope === 'plugin' && e.pluginState === 'disabled') return pc.yellow(pluginStateText('disabled'));
+  if (otherProject(e)) return pc.dim(e.pluginState === 'disabled' ? 'disabled (plugin off)' : 'enabled');
+  if (e.scope === 'plugin' && e.pluginState === 'disabled') return pc.yellow('disabled (plugin off)');
   if (e.status === 'disabled') return pc.yellow('disabled');
   if (e.override === 'off') return pc.yellow('off (settings)');
   if (e.shadowedBy) return pc.yellow('shadowed');
@@ -31,7 +30,8 @@ export function toJson(e) {
     name: e.name, dirName: e.dirName, scope: e.scope, status: e.kind === 'skill' ? e.status : e.kind,
     description: e.description, path: e.path, symlinkTarget: e.symlinkTarget || undefined,
     plugin: e.plugin, pluginState: e.pluginState, pluginScope: e.pluginInfo?.scope,
-    projectPath: e.pluginInfo?.projectPath || undefined, source: e.record?.source, installedAt: e.record?.installedAt,
+    projectPath: (e.scope === 'plugin' ? e.pluginInfo?.projectPath : e.projectRoot) || undefined,
+    loadsHere: e.scope === 'plugin' ? loadsHere(e.pluginInfo) : undefined, source: e.record?.source, installedAt: e.record?.installedAt,
     override: e.override || undefined, shadowedBy: e.shadowedBy || undefined, note: e.note,
   };
 }
@@ -42,7 +42,7 @@ function printHidden(hidden, opts) {
   if (hidden.off.length)
     out.log(pc.dim(`+ ${plural(hidden.off.length, 'skill')} from ${plural(countPlugins(hidden.off), 'disabled plugin')} hidden (${allHint})`));
   if (hidden.elsewhere.length)
-    out.log(pc.dim(`+ ${plural(hidden.elsewhere.length, 'skill')} from ${plural(countPlugins(hidden.elsewhere), 'plugin')} installed only for other projects hidden (${allHint})`));
+    out.log(pc.dim(`+ ${plural(hidden.elsewhere.length, 'skill')} from ${plural(countPlugins(hidden.elsewhere), 'plugin')} installed for other projects hidden (${allHint})`));
 }
 
 export async function listCommand(ctx, opts) {
@@ -54,10 +54,10 @@ export async function listCommand(ctx, opts) {
   const hidden = { off: [], elsewhere: [] };
   if (withPlugins && !opts.all && !opts.disabled) {
     for (const e of entries) {
-      if (e.scope !== 'plugin' || e.pluginState === 'enabled') continue;
-      hidden[e.pluginState === 'project-only' ? 'elsewhere' : 'off'].push(e);
+      if (e.scope !== 'plugin' || loadsHere(e.pluginInfo)) continue;
+      hidden[e.pluginInfo.applicable ? 'off' : 'elsewhere'].push(e);
     }
-    entries = entries.filter((e) => e.scope !== 'plugin' || e.pluginState === 'enabled');
+    entries = entries.filter((e) => e.scope !== 'plugin' || loadsHere(e.pluginInfo));
   }
   if (opts.enabled) entries = entries.filter((e) => e.status === 'enabled');
   if (opts.disabled) entries = entries.filter((e) => e.status === 'disabled');
@@ -78,16 +78,19 @@ export async function listCommand(ctx, opts) {
     return;
   }
 
-  const rows = entries.map((e) => [
-    e.kind === 'skill' ? pc.bold(e.name) : pc.dim(e.dirName),
-    scopeColor(e.scope),
-    statusText(e),
-    pc.dim(clip(e.scope === 'plugin' ? e.plugin : sourceLabel(e.record) || (e.symlinkTarget ? 'symlink' : '—'), 36)),
-    '',
-  ]);
+  const rows = entries.map((e) => {
+    const dim = otherProject(e);
+    return [
+      e.kind === 'skill' && !dim ? pc.bold(e.name) : pc.dim(e.kind === 'skill' ? e.name : e.dirName),
+      dim ? pc.dim(entryScopeLabel(e)) : entryScope(e),
+      statusText(e),
+      pc.dim(clip(e.scope === 'plugin' ? e.plugin : sourceLabel(e.record) || (e.symlinkTarget ? 'symlink' : '—'), 36)),
+      '',
+    ];
+  });
   out.log(table(['NAME', 'SCOPE', 'STATUS', 'SOURCE', 'DESCRIPTION'], rows, {
     lastRaw: (i) => entries[i].kind === 'skill' ? entries[i].description : entries[i].note || 'no SKILL.md — ignored by Claude Code and skill-manager',
-    lastColor: (s, i) => (entries[i].kind === 'skill' ? s : pc.dim(s)),
+    lastColor: (s, i) => (entries[i].kind === 'skill' && !otherProject(entries[i]) ? s : pc.dim(s)),
   }));
 
   const skills = entries.filter((e) => e.kind === 'skill' && e.scope !== 'plugin');
@@ -97,26 +100,31 @@ export async function listCommand(ctx, opts) {
   if (disabled) parts.push(`${disabled} disabled`);
   out.log(pc.dim(parts.join(' · ')));
   for (const s of scopes) out.log(pc.dim(`${s.scope.padEnd(7)} ${tildify(s.skillsDir)}`));
+  if (entries.some(otherProject)) out.log(pc.dim(OTHER_PROJECT_LEGEND));
   if (entries.some((e) => e.shadowedBy))
     out.log(pc.yellow('shadowed') + pc.dim(': a user skill with the same name takes precedence in Claude Code.'));
   if (entries.some((e) => e.override === 'off'))
     out.log(pc.yellow('off (settings)') + pc.dim(': hidden by skillOverrides in a Claude Code settings.json.'));
   const pluginSkills = entries.filter((e) => e.kind === 'skill' && e.scope === 'plugin');
   if (pluginSkills.length) {
-    const on = pluginSkills.filter((e) => e.pluginState === 'enabled');
+    const on = pluginSkills.filter((e) => loadsHere(e.pluginInfo));
+    const elsewhere = pluginSkills.filter(otherProject).length;
+    const off = pluginSkills.length - on.length - elsewhere;
     const plugins = new Set(on.map((e) => e.plugin));
     out.log(pc.dim(`${plural(on.length, 'plugin skill')} from ${plural(plugins.size, 'enabled plugin')}` +
-      (on.length < pluginSkills.length ? ` · ${pluginSkills.length - on.length} from plugins that are off here` : '')));
+      (off ? ` · ${off} from plugins that are off here` : '') +
+      (elsewhere ? ` · ${elsewhere} from plugins installed for other projects` : '')));
   }
   printHidden(hidden, opts);
-  if (entries.some((e) => e.pluginState === 'disabled'))
+  if (entries.some((e) => e.pluginState === 'disabled' && !otherProject(e)))
     out.log(pc.yellow('disabled (plugin off)') + pc.dim(': the plugin is off in enabledPlugins; turn it on with "skm plugin enable <plugin>".'));
   if (!withPlugins && !opts.user && !opts.project) {
     const all = scanPlugins(ctx);
-    const n = all.filter((e) => e.pluginState === 'enabled').length;
+    const n = all.filter((e) => loadsHere(e.pluginInfo)).length;
+    const here = all.filter((e) => e.pluginInfo.applicable);
     const how = opts.pluginHint || 'run "skm list --plugins"';
     if (n) out.log(pc.dim(`+ ${plural(n, 'plugin skill')} not shown (${how}).`));
-    else if (all.length) out.log(pc.dim(`+ ${plural(all.length, 'plugin skill')} from plugins that are off not shown (${how}).`));
+    else if (here.length) out.log(pc.dim(`+ ${plural(here.length, 'plugin skill')} from plugins that are off not shown (${how}).`));
   }
 }
 
@@ -147,7 +155,8 @@ function showInfo(e, opts) {
   const kv = (k, v) => out.log(`${pc.dim(k.padEnd(12))} ${v}`);
   out.log(pc.bold(e.name));
   out.blank();
-  kv('scope', scopeColor(e.scope) + (e.plugin ? pc.dim(` (${e.plugin}, read-only)`) : ''));
+  kv('scope', entryScope(e) + (e.plugin ? pc.dim(` (${e.plugin}, read-only)`) : ''));
+  if (otherProject(e)) kv('loads', pc.dim('only when Claude Code runs in that project'));
   kv('status', statusText(e));
   kv('path', tildify(e.path));
   if (e.symlinkTarget) kv('links to', tildify(e.symlinkTarget));
@@ -205,7 +214,7 @@ export async function searchCommand(ctx, term, opts) {
   const hl = (s) => s.replace(new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'ig'), (m) => pc.bold(pc.yellow(m)));
   const width = (process.stdout.columns || 120) - 4;
   for (const { e } of entries) {
-    out.log(`${pc.bold(hl(e.name))} ${pc.dim('·')} ${scopeColor(e.scope)}${e.status === 'disabled' ? pc.yellow(' (disabled)') : ''}`);
+    out.log(`${pc.bold(hl(e.name))} ${pc.dim('·')} ${entryScope(e)}${e.status === 'disabled' ? pc.yellow(' (disabled)') : ''}`);
     const d = e.description.replace(/\s+/g, ' ');
     const i = d.toLowerCase().indexOf(t);
     const start = i > width / 2 ? i - Math.floor(width / 3) : 0;

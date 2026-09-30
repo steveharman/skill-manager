@@ -59,7 +59,7 @@ describe('plugin status', () => {
     assert.equal(table.code, 0, table.out);
     assert.doesNotMatch(table.stdout, /off:a/);
     assert.match(table.stdout, /\+ 2 skills from 1 disabled plugin hidden \(use --all\)/);
-    assert.match(sb.run(['list', '--all']).stdout, /off:a\s+plugin\s+disabled \(plugin off\)/);
+    assert.match(sb.run(['list', '--all']).stdout, /off:a\s+user\s+disabled \(plugin off\)/);
     assert.match(sb.run(['plugin', 'list']).stdout, /off@mk\s+user\s+disabled\s+2\s+1\.0\.0\s+.*settings\.json: false/);
   });
 
@@ -107,25 +107,80 @@ describe('plugin status', () => {
     assert.deepEqual(snapshot(join(sb.home, '.claude')), before);
   });
 
-  test('a project-scope install for another project is shown as project-only, not skipped', () => {
+  test('another project\'s install: SCOPE is its path, STATUS is on/off as decided in that project', () => {
     const other = join(sb.root, 'other');
     installPlugin(sb.home, 'elsewhere@mk', { scope: 'project', projectPath: other, skills: ['x'] });
     writeSettings(join(other, '.claude', 'settings.json'), { enabledPlugins: { 'elsewhere@mk': true } });
 
     const row = byId(pluginRows())[`elsewhere@mk|${other}`];
-    assert.equal(row.state, 'project-only');
-    assert.equal(row.scope, 'project');
+    assert.equal(row.state, 'enabled', 'state is never a location');
+    assert.equal(row.scope, 'project', 'JSON keeps scope: "project"');
+    assert.equal(row.projectPath, other, 'and the path separately');
     assert.equal(row.enabled, true, 'enabled in the project it belongs to');
-    assert.match(sb.run(['plugin', 'list']).stdout, /elsewhere@mk\s+project\s+project-only \(.*other\)/);
+    assert.equal(row.loadsHere, false);
+    assert.equal(row.decidedBy.file, join(other, '.claude', 'settings.json'));
+
+    const text = sb.run(['plugin', 'list']).stdout;
+    assert.match(text, /elsewhere@mk\s+\S*other\s+enabled\s+1\s/);
+    assert.doesNotMatch(text, /project-only|elsewhere@mk\s+project\s/);
+    assert.match(text, /1 plugin · 0 enabled · 0 disabled · 1 installed for other projects/);
+    assert.match(text, /installed for another project — loads only when Claude Code runs there/);
 
     assert.deepEqual(json(sb.run(['list', '--plugins', '--json'])), []);
-    assert.match(sb.run(['list', '--plugins']).stdout, /\+ 1 skill from 1 plugin installed only for other projects hidden \(use --all\)/);
+    assert.match(sb.run(['list', '--plugins']).stdout, /\+ 1 skill from 1 plugin installed for other projects hidden \(use --all\)/);
     const all = json(sb.run(['list', '--all', '--json']));
-    assert.equal(all.find((e) => e.name === 'elsewhere:x').pluginState, 'project-only');
-    assert.match(sb.run(['list', '--all']).stdout, /elsewhere:x\s+plugin\s+project-only \(/);
+    const x = all.find((e) => e.name === 'elsewhere:x');
+    assert.equal(x.pluginState, 'enabled');
+    assert.equal(x.scope, 'plugin');
+    assert.equal(x.pluginScope, 'project');
+    assert.equal(x.projectPath, other);
+    assert.equal(x.loadsHere, false);
+    const listed = sb.run(['list', '--all']).stdout;
+    assert.match(listed, /elsewhere:x\s+\S*other\s+enabled\s+elsewhere@mk/);
+    assert.doesNotMatch(listed, /project-only/);
+    assert.match(listed, /installed for another project — loads only when Claude Code runs there/);
 
-    // In its own project it is simply enabled.
-    assert.equal(byId(pluginRows([], { cwd: other }))[`elsewhere@mk|${other}`].state, 'enabled');
+    // In its own project it is simply enabled, not dimmed, no legend.
+    const own = byId(pluginRows([], { cwd: other }))[`elsewhere@mk|${other}`];
+    assert.equal(own.state, 'enabled');
+    assert.equal(own.loadsHere, true);
+    assert.doesNotMatch(sb.run(['plugin', 'list'], { cwd: other }).stdout, /installed for another project/);
+  });
+
+  test('another project\'s install is disabled when that project\'s settings say so (settings.local.json wins)', () => {
+    const other = join(sb.root, 'other');
+    installPlugin(sb.home, 'elsewhere@mk', { scope: 'project', projectPath: other, skills: ['x'] });
+    writeSettings(join(other, '.claude', 'settings.json'), { enabledPlugins: { 'elsewhere@mk': true } });
+    writeSettings(join(other, '.claude', 'settings.local.json'), { enabledPlugins: { 'elsewhere@mk': false } });
+    // The current project's settings must not leak into another project's answer.
+    writeSettings(projectSettings, { enabledPlugins: { 'elsewhere@mk': true } });
+
+    const row = byId(pluginRows())[`elsewhere@mk|${other}`];
+    assert.equal(row.state, 'disabled');
+    assert.equal(row.enabled, false);
+    assert.equal(row.decidedBy.scope, 'local');
+    assert.equal(row.decidedBy.file, join(other, '.claude', 'settings.local.json'));
+    assert.match(sb.run(['plugin', 'list']).stdout, /elsewhere@mk\s+\S*other\s+disabled\s/);
+    assert.match(sb.run(['list', '--all']).stdout, /elsewhere:x\s+\S*other\s+disabled \(plugin off\)/);
+    assert.equal(json(sb.run(['list', '--all', '--json'])).find((e) => e.name === 'elsewhere:x').pluginState, 'disabled');
+  });
+
+  test('a long project path is clipped from the left in SCOPE; the plugin name never is', () => {
+    const other = join(sb.root, 'a-rather-long-folder-name', 'infra', 'health-worker');
+    const id = 'a-plugin-with-a-really-quite-long-name@some-marketplace';
+    installPlugin(sb.home, id, { scope: 'project', projectPath: other, skills: ['x'] });
+    const text = sb.run(['plugin', 'list'], { env: { COLUMNS: '80' } }).stdout;
+    const line = text.split('\n').find((l) => l.startsWith(id));
+    assert.ok(line, text);
+    const scope = line.slice(id.length).trim().split(/\s+/)[0];
+    assert.ok(scope.startsWith('…') && scope.endsWith('/infra/health-worker'), scope);
+    assert.equal(scope.length, 28);
+  });
+
+  test('no legend when every plugin loads here', () => {
+    installPlugin(sb.home, 'p@mk');
+    assert.doesNotMatch(sb.run(['plugin', 'list']).stdout, /installed for another project/);
+    assert.doesNotMatch(sb.run(['list', '--all']).stdout, /installed for another project/);
   });
 
   test('the same plugin from two marketplaces is two entries', () => {

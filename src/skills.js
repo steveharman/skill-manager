@@ -3,9 +3,9 @@ import { lstatSync, readdirSync, readFileSync, realpathSync, statSync } from 'no
 import { basename, join } from 'node:path';
 import { parseFrontmatter } from './frontmatter.js';
 import { readJson } from './fsutil.js';
-import { discoverPlugins } from './plugins.js';
+import { discoverPlugins, loadsHere } from './plugins.js';
 import { loadState } from './state.js';
-import { SkmError, didYouMean, isInteractive, prompt, scopeColor, tildify } from './ui.js';
+import { SkmError, didYouMean, entryScope, isInteractive, prompt, tildify } from './ui.js';
 
 /**
  * @typedef {object} Entry
@@ -21,7 +21,8 @@ import { SkmError, didYouMean, isInteractive, prompt, scopeColor, tildify } from
  * @property {string|null} symlinkTarget
  * @property {string} [plugin]  plugin id (name@marketplace) for plugin skills
  * @property {import('./plugins.js').Plugin} [pluginInfo]
- * @property {'enabled'|'disabled'|'project-only'} [pluginState]
+ * @property {'enabled'|'disabled'} [pluginState]  the plugin's on/off state where it belongs (see pluginInfo.applicable)
+ * @property {string|null} [projectRoot]  project root for project-scope skills
  * @property {object|null} record   skill-manager.json record
  * @property {string|null} override skillOverrides value from settings
  * @property {string|null} shadowedBy
@@ -118,6 +119,7 @@ export function scanScope(scope) {
       const e = entryFor(p, dirName, scope.scope, status);
       if (!e) continue;
       e.record = state.skills[dirName] || null;
+      e.projectRoot = scope.scope === 'project' ? scope.root : null;
       if (e.kind === 'not-skill' && dirName === 'synced' && scope.scope === 'user')
         e.note = 'claude.ai synced skills (managed by Claude Code)';
       entries.push(e);
@@ -128,7 +130,8 @@ export function scanScope(scope) {
 
 /**
  * Skills shipped by installed plugins (read-only), one entry per skill per install record.
- * `status` is 'enabled' only when the plugin is on where skm runs; `pluginState` says why not.
+ * `status`/`pluginState` are the plugin's on/off state where it belongs (for another project's install, in that
+ * project); whether it loads where skm runs is `pluginInfo.applicable`.
  * @param {import('./context.js').Context} ctx
  * @param {import('./plugins.js').Plugin[]} [plugins]
  */
@@ -136,7 +139,7 @@ export function scanPlugins(ctx, plugins = discoverPlugins(ctx)) {
   const entries = [];
   for (const plugin of plugins) {
     for (const p of plugin.skillDirs) {
-      const e = entryFor(p, basename(p), 'plugin', plugin.state === 'enabled' ? 'enabled' : 'disabled');
+      const e = entryFor(p, basename(p), 'plugin', plugin.enabled ? 'enabled' : 'disabled');
       if (!e || e.kind !== 'skill') continue;
       e.plugin = plugin.id;
       e.pluginInfo = plugin;
@@ -154,7 +157,7 @@ export function scanPlugins(ctx, plugins = discoverPlugins(ctx)) {
  */
 export function pluginSkillError(entry, action) {
   const { name } = entry.pluginInfo || { name: entry.plugin.split('@')[0] };
-  const already = (action === 'disable') === (entry.pluginState !== 'enabled');
+  const already = (action === 'disable') === !loadsHere(entry.pluginInfo);
   if (already && (action === 'enable' || action === 'disable'))
     return new SkmError(`"${entry.name}" comes from the plugin ${entry.plugin}, which is already ${action}d here.`, {
       hint: "Claude Code's skillOverrides setting does not apply to plugin skills; see \"skm plugin list\" for what decides each plugin.",
@@ -253,7 +256,7 @@ export async function resolveSkill(ctx, name, opts = {}) {
   if (isInteractive()) {
     const chosen = await prompt.select(
       `"${name}" exists in more than one place. Which one${opts.action ? ` do you want to ${opts.action}` : ''}?`,
-      found.map((e) => ({ value: e, label: `${scopeColor(e.scope)} ${e.status}`, hint: tildify(e.path) })),
+      found.map((e) => ({ value: e, label: `${entryScope(e)} ${e.status}`, hint: tildify(e.path) })),
     );
     return opts.multiple ? [chosen] : chosen;
   }

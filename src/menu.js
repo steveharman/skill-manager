@@ -11,7 +11,7 @@ import { collect } from './skills.js';
 import { discoverPlugins } from './plugins.js';
 import { applyPluginChanges, pluginListCommand } from './commands/plugin.js';
 import { basename } from 'node:path';
-import { SkmError, clack, out, plural, printError, prompt, tildify } from './ui.js';
+import { SkmError, clack, entryScopeLabel, out, plural, printError, prompt, scopeLabel, tildify } from './ui.js';
 
 const pickSkill = async (ctx, message, filter = () => true) => {
   const skills = collect(ctx).filter((e) => e.kind === 'skill' && filter(e));
@@ -22,7 +22,7 @@ const pickSkill = async (ctx, message, filter = () => true) => {
   return prompt.select(message, skills.map((e) => ({
     value: e,
     label: `${e.name}${e.status === 'disabled' ? pc.yellow(' (disabled)') : ''}`,
-    hint: e.scope,
+    hint: entryScopeLabel(e),
   })));
 };
 
@@ -33,7 +33,7 @@ async function toggleScreen(ctx) {
   const keyOf = (e) => `${e.scope}:${e.dirName}`;
   const chosen = await prompt.multiselect(
     'Enabled skills (space toggles, enter saves):',
-    skills.map((e) => ({ value: keyOf(e), label: e.name, hint: `${e.scope}${e.shadowedBy ? ', shadowed by user skill' : ''}` })),
+    skills.map((e) => ({ value: keyOf(e), label: e.name, hint: `${entryScopeLabel(e)}${e.shadowedBy ? ', shadowed by user skill' : ''}` })),
     skills.filter((e) => e.status === 'enabled').map(keyOf),
   );
   const want = new Set(chosen);
@@ -48,7 +48,7 @@ async function toggleScreen(ctx) {
       continue;
     }
     movePath(e.path, dest);
-    out.success(`${to === 'enabled' ? 'Enabled' : 'Disabled'} ${e.name} ${pc.dim(`(${e.scope})`)}`);
+    out.success(`${to === 'enabled' ? 'Enabled' : 'Disabled'} ${e.name} ${pc.dim(`(${entryScopeLabel(e)})`)}`);
     changed++;
   }
   if (!changed) out.info('No changes.');
@@ -65,7 +65,7 @@ async function pluginToggleScreen(ctx) {
     'Enabled plugins (space toggles, enter saves):',
     plugins.map((p) => ({
       value: p.id, label: p.id,
-      hint: `${plural(p.skillDirs.length, 'skill')} · ${p.scope}${p.decidedBy.scope === 'managed' ? ' · managed, locked' : ''}`,
+      hint: `${plural(p.skillDirs.length, 'skill')} · ${scopeLabel(p.scope, p.projectPath)}${p.decidedBy.scope === 'managed' ? ' · managed, locked' : ''}`,
     })),
     plugins.filter((p) => p.enabled).map((p) => p.id),
   );
@@ -94,7 +94,7 @@ export async function runMenu() {
     const where = ctx.project ? `user + project ${pc.dim(basename(ctx.project.root))}` : 'user scope (not in a project)';
     const plugins = discoverPlugins(ctx);
     const pluginIds = new Set(plugins.filter((p) => p.applicable).map((p) => p.id));
-    const onIds = new Set(plugins.filter((p) => p.state === 'enabled').map((p) => p.id));
+    const onIds = new Set(plugins.filter((p) => p.applicable && p.enabled).map((p) => p.id));
     const pluginSummary = pluginIds.size ? ` · ${onIds.size}/${plural(pluginIds.size, 'plugin')} on` : '';
     const choice = await prompt.select(`${plural(skills.length, 'skill')}${pluginSummary} · ${where}\nWhat would you like to do?`, [
       { value: 'list', label: 'List skills' },

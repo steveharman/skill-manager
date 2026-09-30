@@ -77,11 +77,11 @@ export async function doctorCommand(ctx, target, opts = {}) {
       const relevant = r.issues.filter((i) => opts.verbose || i.level !== 'info');
       if (!relevant.length) {
         clean++;
-        if (opts.verbose || target) out.log(`${pc.green('✔')} ${pc.bold(r.label)} ${r.scope ? scopeColor(r.scope) : ''}`);
+        if (opts.verbose || target) out.log(`${pc.green('✔')} ${pc.bold(r.label)} ${r.scope ? scopeColor(r.scope, r.scope === 'project' ? ctx.project?.root : null) : ''}`);
         continue;
       }
       const worst = relevant.some((i) => i.level === 'error') ? pc.red('✖') : relevant.some((i) => i.level === 'warn') ? pc.yellow('▲') : pc.cyan('ℹ');
-      out.log(`${worst} ${pc.bold(r.label)} ${r.scope ? scopeColor(r.scope) : ''} ${pc.dim(tildify(r.path))}`);
+      out.log(`${worst} ${pc.bold(r.label)} ${r.scope ? scopeColor(r.scope, r.scope === 'project' ? ctx.project?.root : null) : ''} ${pc.dim(tildify(r.path))}`);
       printIssues(relevant, '    ');
     }
     if (results.length) out.blank();

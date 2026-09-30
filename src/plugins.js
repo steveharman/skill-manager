@@ -161,10 +161,15 @@ function defaultEnabledFor(ctx, cache, name, marketplace, manifest) {
  * @property {string} version
  * @property {string} installPath
  * @property {string[]} skillDirs
- * @property {boolean} enabled      on in the context it belongs to (the other project for project-only rows)
+ * @property {boolean} enabled      on in the context it belongs to: for another project's install, what Claude Code
+ *                                  decides when it runs in that project (user → its settings.json → its
+ *                                  settings.local.json → managed)
  * @property {{scope: string, file: string|null, value?: boolean, reason?: string}} decidedBy
- * @property {'enabled'|'disabled'|'project-only'} state   what it means where skm runs
+ * @property {'enabled'|'disabled'} state   always on/off; where it loads is `applicable` (location is not a state)
  */
+
+/** True when the plugin is on in the directory skm runs in. */
+export const loadsHere = (p) => Boolean(p?.applicable && p.enabled);
 
 /** Every installed plugin, one row per install record (nothing de-duplicated), plus synced plugins. */
 export function discoverPlugins(ctx) {
@@ -198,7 +203,7 @@ export function discoverPlugins(ctx) {
           version: String(inst.version ?? manifest?.version ?? ''), installPath: inst.installPath,
           skillDirs: pluginSkillDirs(inst.installPath, manifest),
           enabled: decidedBy.enabled, decidedBy,
-          state: !applicable ? 'project-only' : decidedBy.enabled ? 'enabled' : 'disabled',
+          state: decidedBy.enabled ? 'enabled' : 'disabled',
         });
       }
     }

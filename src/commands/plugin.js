@@ -2,18 +2,16 @@
 import pc from 'picocolors';
 import { noProjectError } from '../context.js';
 import { decidedByLabel, discoverPlugins, settingsFileFor, settingsLayers, splitId, writeEnabledPlugins } from '../plugins.js';
-import { SkmError, didYouMean, isInteractive, out, plural, prompt, table, tildify } from '../ui.js';
-import { pluginStateText } from './list.js';
+import { OTHER_PROJECT_LEGEND, SkmError, didYouMean, isInteractive, out, plural, prompt, scopeColor, scopeLabel, table, tildify } from '../ui.js';
 
+/** STATUS is only ever enabled/disabled; another project's install is dimmed, its location is in SCOPE. */
 const stateColor = (p) =>
-  p.state === 'enabled' ? pc.green('enabled') : p.state === 'disabled' ? pc.yellow('disabled') : pc.dim(pluginStateText(p.state, p.projectPath));
-
-const scopeText = (s) => (s === 'user' ? pc.cyan(s) : s === 'project' || s === 'local' ? pc.magenta(s) : pc.blue(s));
+  !p.applicable ? pc.dim(p.state) : p.state === 'enabled' ? pc.green('enabled') : pc.yellow('disabled');
 
 function pluginJson(p) {
   return {
     id: p.id, name: p.name, marketplace: p.marketplace, scope: p.scope, projectPath: p.projectPath || undefined,
-    state: p.state, enabled: p.enabled, skills: p.skillDirs.length, version: p.version || undefined,
+    state: p.state, enabled: p.enabled, loadsHere: p.applicable && p.enabled, skills: p.skillDirs.length, version: p.version || undefined,
     decidedBy: { scope: p.decidedBy.scope, file: p.decidedBy.file || undefined, value: p.decidedBy.value, reason: p.decidedBy.reason },
     installPath: p.installPath,
   };
@@ -35,17 +33,24 @@ export async function pluginListCommand(ctx, opts = {}) {
     out.hint(`Claude Code records plugin installs in ${tildify(ctx.pluginsDir)}/installed_plugins.json. Install with /plugin.`);
     return;
   }
-  const rows = plugins.map((p) => [pc.bold(p.id), scopeText(p.scope), stateColor(p), String(p.skillDirs.length), pc.dim(p.version || '—'), '']);
+  const rows = plugins.map((p) => {
+    const d = p.applicable ? (s) => s : pc.dim;
+    return [p.applicable ? pc.bold(p.id) : pc.dim(p.id), p.applicable ? scopeColor(p.scope, p.projectPath) : pc.dim(scopeLabel(p.scope, p.projectPath)),
+      stateColor(p), d(String(p.skillDirs.length)), pc.dim(p.version || '—'), ''];
+  });
   out.log(table(['PLUGIN', 'SCOPE', 'STATUS', 'SKILLS', 'VERSION', 'DECIDED BY'], rows, {
     lastRaw: (i) => decidedByLabel(plugins[i]),
     lastColor: (s) => pc.dim(s),
     noTruncate: true, // the deciding file is the point of this column
   }));
-  const count = (st) => plugins.filter((p) => p.state === st).length;
+  const here = plugins.filter((p) => p.applicable);
+  const elsewhere = plugins.length - here.length;
+  const count = (st) => here.filter((p) => p.state === st).length;
   const parts = [plural(plugins.length, 'plugin'), `${count('enabled')} enabled`, `${count('disabled')} disabled`];
-  if (count('project-only')) parts.push(`${count('project-only')} installed only for other projects`);
+  if (elsewhere) parts.push(`${elsewhere} installed for other projects`);
   out.blank();
   out.log(pc.dim(parts.join(' · ')));
+  if (elsewhere) out.log(pc.dim(OTHER_PROJECT_LEGEND));
   out.log(pc.dim(`Change with "skm plugin enable|disable <name>" (writes enabledPlugins; -p project, --local this machine only).`));
 }
 
@@ -67,7 +72,7 @@ export async function resolvePluginId(ctx, plugins, input, action = 'change') {
   if (byName.length > 1) {
     const describe = (id) => {
       const rows = plugins.filter((p) => p.id === id);
-      return rows.length ? rows.map((p) => pluginStateText(p.state, p.projectPath)).join(', ') : 'not installed';
+      return rows.length ? rows.map((p) => `${scopeLabel(p.scope, p.projectPath)}: ${p.state}`).join(', ') : 'not installed';
     };
     if (isInteractive())
       return prompt.select(`"${input}" is provided by more than one marketplace. Which one do you want to ${action}?`,

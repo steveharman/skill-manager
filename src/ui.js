@@ -168,7 +168,51 @@ export function formatBytes(n) {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
-export const scopeColor = (scope) =>
-  scope === 'user' ? pc.cyan(scope) : scope === 'project' ? pc.magenta(scope) : pc.blue(scope);
+/** $HOME → ~ only. Unlike tildify it is never cwd-relative, so a project path reads the same from anywhere. */
+export function homePath(p) {
+  const home = process.env.HOME || homedir();
+  if (!p) return p;
+  if (p === home) return '~';
+  return p.startsWith(home + '/') ? '~' + p.slice(home.length) : p;
+}
+
+/** Keep the tail of a long path, e.g. "…/infra/health-worker". */
+export function clipPath(p, max = 28) {
+  p = String(p ?? '');
+  return p.length > max ? '…' + p.slice(p.length - max + 1) : p;
+}
+
+export const SCOPE_WIDTH = 28;
+
+/**
+ * Where something is installed, in words: `user`, `synced`, `managed`, or for a project install just the
+ * project path (e.g. `~/carememo`); a local (settings.local) install adds " (local)".
+ * @param {string} scope
+ * @param {string|null} [projectPath]
+ */
+export function scopeLabel(scope, projectPath) {
+  if ((scope === 'project' || scope === 'local') && projectPath) {
+    const suffix = scope === 'local' ? ' (local)' : '';
+    return clipPath(homePath(projectPath), SCOPE_WIDTH - suffix.length) + suffix;
+  }
+  return scope;
+}
+
+/** scopeLabel, colored: user cyan, project paths magenta, anything else blue. */
+export const scopeColor = (scope, projectPath) => {
+  const label = scopeLabel(scope, projectPath);
+  return scope === 'user' ? pc.cyan(label) : scope === 'project' || scope === 'local' ? pc.magenta(label) : pc.blue(label);
+};
+
+/** A skill entry's scope for display: plugin skills show where their plugin is installed. */
+export const entryScope = (e) =>
+  e.scope === 'plugin' && e.pluginInfo ? scopeColor(e.pluginInfo.scope, e.pluginInfo.projectPath) : scopeColor(e.scope, e.projectRoot);
+
+/** Plain-text version of entryScope. */
+export const entryScopeLabel = (e) =>
+  e.scope === 'plugin' && e.pluginInfo ? scopeLabel(e.pluginInfo.scope, e.pluginInfo.projectPath) : scopeLabel(e.scope, e.projectRoot);
+
+/** Legend under a table with dimmed rows for installs that belong to another project. */
+export const OTHER_PROJECT_LEGEND = `${pc.isColorSupported ? 'dimmed' : 'other-project rows'}: installed for another project — loads only when Claude Code runs there`;
 
 export const plural = (n, word, pluralWord = word + 's') => `${n} ${n === 1 ? word : pluralWord}`;

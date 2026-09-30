@@ -30,6 +30,22 @@ describe('list', () => {
     assert.match(table.stdout, /u1\s+user\s+enabled/);
   });
 
+  test('a project skill\'s SCOPE is the project path (no "project" word); JSON keeps scope + projectPath', () => {
+    const app = join(sb.home, 'work', 'myapp');
+    mkdirSync(join(app, '.git'), { recursive: true });
+    writeSkill(join(app, '.claude', 'skills', 'p1'), { name: 'p1', description: 'Project thing.' });
+    const table = sb.run(['list'], { cwd: app });
+    assert.equal(table.code, 0, table.out);
+    assert.match(table.stdout, /p1\s+~\/work\/myapp\s+enabled/);
+    assert.doesNotMatch(table.stdout, /p1\s+project\s/);
+    assert.doesNotMatch(table.stdout, /installed for another project/, 'no legend without dimmed rows');
+    const [row] = json(sb.run(['list', '--json'], { cwd: app }));
+    assert.equal(row.scope, 'project');
+    assert.equal(row.projectPath, app);
+    assert.match(sb.run(['info', 'p1'], { cwd: app }).stdout, /scope\s+~\/work\/myapp/);
+    assert.match(sb.run(['search', 'thing'], { cwd: app }).stdout, /p1 · ~\/work\/myapp/);
+  });
+
   test('non-skill folders are hidden by default and flagged with --all', () => {
     makeSyncedDir(sb.userSkills);
     writeSkill(join(sb.userSkills, 'real'), { name: 'real' });
@@ -95,7 +111,7 @@ describe('list', () => {
     writeSkill(join(sb.userSkills, 'u1'), { name: 'u1' });
     const plugins = sb.run(['--plugins']);
     assert.equal(plugins.code, 0, plugins.out);
-    assert.match(plugins.stdout, /plug:pskill\s+plugin/);
+    assert.match(plugins.stdout, /plug:pskill\s+user\s+enabled\s+plug@mk/, 'a plugin skill shows where its plugin is installed');
     assert.deepEqual(json(sb.run(['--json'])).map((e) => e.name), ['u1']);
     assert.deepEqual(json(sb.run(['--no-input', '--all', '--json'])).map((e) => e.name).sort(), ['plug:pskill', 'u1']);
     assert.deepEqual(json(sb.run(['--user', '--project-dir', sb.project, '--json'])).map((e) => e.name), ['u1']);
