@@ -68,10 +68,11 @@ export function buildProgram() {
   scoped(program.command('list').alias('ls').description('list installed skills (both scopes by default)'))
     .option('--json', 'machine-readable output')
     .option('--plugins', 'also list skills from enabled plugins (read-only)')
-    .option('-a, --all', 'include every plugin skill (also from disabled plugins and other projects) and non-skill folders (like synced/)')
+    .option('--claude-ai', 'also list skills synced from your claude.ai account (read-only)')
+    .option('-a, --all', 'include every plugin skill (also from disabled plugins and other projects), claude.ai skills (also for other accounts) and non-skill folders')
     .option('--enabled', 'only enabled skills')
     .option('--disabled', 'only disabled skills')
-    .addHelpText('after', examples(['skm list', 'skm ls --user', 'skm list --project --json', 'skm list --plugins', 'skm list --all']))
+    .addHelpText('after', examples(['skm list', 'skm ls --user', 'skm list --project --json', 'skm list --plugins', 'skm list --claude-ai', 'skm list --all']))
     .action(action((ctx, opts) => listCommand(ctx, opts)));
 
   scoped(program.command('info').argument('<name>', 'skill name').description('show frontmatter, location, files and source of a skill'))
@@ -208,7 +209,7 @@ export function buildProgram() {
 
 /** Options `skm list` accepts; `true` means the option takes a value. */
 const LIST_FLAGS = {
-  '--json': false, '--plugins': false, '-a': false, '--all': false, '--enabled': false, '--disabled': false,
+  '--json': false, '--plugins': false, '--claude-ai': false, '-a': false, '--all': false, '--enabled': false, '--disabled': false,
   '-g': false, '--user': false, '-p': false, '--project': false, '--project-dir': true,
 };
 

@@ -121,3 +121,38 @@ export function writeSettings(file, data, text) {
   writeFileSync(file, text ?? JSON.stringify(data, null, 2) + '\n');
   return file;
 }
+
+export const ORG_A = '3d0a8465-ab81-4162-93bf-9d3079518e11';
+export const ACCT_A = 'ba7a8649-2f05-4d52-960f-9cfd56a249cf';
+export const ORG_B = '57a2e8c8-ac61-4723-b920-be0bc1ee3eb6';
+export const ACCT_B = 'd79d73e5-7622-4ffa-9585-d7edf74bdc71';
+
+/**
+ * A claude.ai sync bucket the way Claude Code writes it: <config>/skills/synced/<org>_<account>/ with a
+ * manifest.json, one folder per skill and a hidden .bucket-<name> marker next to it.
+ * @param {string} configDir  the .claude folder
+ * @param {{name: string, description?: string, inManifest?: boolean, fm?: string}[]} skills
+ * @returns {string} bucket path
+ */
+export function makeSyncedBucket(configDir, org, account, skills) {
+  const root = join(configDir, 'skills', 'synced');
+  const bucket = `${org}_${account}`;
+  const dir = join(root, bucket);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(root, `.bucket-${bucket}`), '');
+  writeFileSync(join(dir, '.last-complete-round'), 'round cli');
+  const manifest = { lastUpdated: 1790766625370, skills: [] };
+  for (const s of skills) {
+    writeSkill(join(dir, s.name), { raw: s.fm ?? `---\nname: ${s.name}\ndescription: "Frontmatter text for ${s.name}."\n---\n\nBody.\n` });
+    if (s.inManifest !== false)
+      manifest.skills.push({ skillId: s.name, name: s.name, description: s.description ?? `Manifest text for ${s.name}.`,
+        source: 'anthropic', updatedAt: '2026-09-22T18:00:37.886566Z' });
+  }
+  writeFileSync(join(dir, 'manifest.json'), JSON.stringify(manifest, null, 2));
+  return dir;
+}
+
+/** The global config Claude Code keeps next to HOME (~/.claude.json), signed in to one org/account. */
+export function signIn(file, org, account) {
+  writeFileSync(file, JSON.stringify({ oauthAccount: { organizationUuid: org, accountUuid: account, emailAddress: 'x@y' } }));
+}

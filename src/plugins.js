@@ -14,6 +14,7 @@
 import { chmodSync, copyFileSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { exists, isDir, readJson, timestamp } from './fsutil.js';
+import { activeBucketName } from './synced.js';
 import { SkmError, tildify } from './ui.js';
 
 const real = (p) => {
@@ -157,7 +158,10 @@ function defaultEnabledFor(ctx, cache, name, marketplace, manifest) {
  * @property {string} skillPrefix   namespace of its skills (manifest name, else the id's name)
  * @property {'user'|'project'|'local'|'managed'|'synced'} scope   install scope
  * @property {string|null} projectPath  for project/local installs
- * @property {boolean} applicable   loaded in the current context (false: installed for another project)
+ * @property {boolean} applicable   loaded in the current context (false: installed for another project, or synced
+ *                                  for a claude.ai account Claude Code is not signed in to)
+ * @property {boolean} [otherAccount]  synced plugin from another claude.ai account's bucket
+ * @property {string} [bucket]      synced plugins: the <org>_<account> bucket folder
  * @property {string} version
  * @property {string} installPath
  * @property {string[]} skillDirs
@@ -219,6 +223,9 @@ export function discoverPlugins(ctx) {
   }
   const layers = layersFor(here);
   const syncOff = syncedPluginsOff(layers);
+  // Buckets are per claude.ai account (<org>_<account>); only the signed-in one loads. Unknown → treat all as live.
+  const activeName = activeBucketName(ctx);
+  const activeKnown = Boolean(activeName && buckets.includes(activeName));
   for (const b of buckets) {
     const bucket = join(syncedRoot, b);
     if (!isDir(bucket)) continue;
@@ -241,7 +248,8 @@ export function discoverPlugins(ctx) {
         decidedBy = { enabled: false, scope: l.scope, file: l.file, reason: 'syncClaudeAiPlugins: false' };
       }
       plugins.push({
-        id, name, marketplace: 'synced', skillPrefix: name, scope: 'synced', projectPath: null, applicable: true,
+        id, name, marketplace: 'synced', skillPrefix: name, scope: 'synced', projectPath: null,
+        applicable: !activeKnown || b === activeName, otherAccount: activeKnown && b !== activeName, bucket: b,
         version: String(meta?.version ?? manifest?.version ?? ''), installPath,
         skillDirs: pluginSkillDirs(installPath, manifest), enabled: decidedBy.enabled, decidedBy,
         state: decidedBy.enabled ? 'enabled' : 'disabled',

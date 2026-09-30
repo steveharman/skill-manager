@@ -16,11 +16,12 @@ user    ~/.claude/skills
 project ./.claude/skills
 ```
 
-SCOPE says where something is installed: `user`, `synced` (claude.ai plugins), or the project's path
+SCOPE says where something is installed: `user`, `claude.ai` (synced from your claude.ai account), or the project's path
 (e.g. `~/myapp`) for project scope. STATUS only ever says whether it is on: `enabled` or `disabled`,
 plus qualifiers such as `shadowed`, `off (settings)` or `disabled (plugin off)`. Long project paths
 are shortened from the left (`…/infra/health-worker`). `--json` keeps `scope: "project"` and puts the
-path in a separate `projectPath` field.
+path in a separate `projectPath` field; for claude.ai rows it keeps `scope: "synced"` and adds
+`scopeLabel: "claude.ai"`.
 
 ```text
 $ skm plugin list
@@ -29,7 +30,7 @@ caveman@caveman                      user                          enabled   5  
 cloudflare@cloudflare                ~/pikkos/infra/health-worker  enabled   8       1.0.0    default (defaultEnabled: true)
 revenuecat@claude-plugins-official   ~/carememo                    enabled   18      2.2.1    ~/carememo/.claude/settings.json: true
 superpowers@claude-plugins-official  user                          disabled  15      6.4.1    ~/.claude/settings.json: false
-token-optimizer-cowork@synced        synced                        enabled   5       0006     default (defaultEnabled: true; …)
+token-optimizer-cowork@synced        claude.ai                     enabled   5       0006     default (defaultEnabled: true; …)
 
 5 plugins · 2 enabled · 1 disabled · 2 installed for other projects
 dimmed: installed for another project — loads only when Claude Code runs there
@@ -87,7 +88,7 @@ Every command has `--help` with examples: `skm install --help`.
 
 | Command | What it does |
 | --- | --- |
-| `skm list` (`ls`) | Table of skills: name, scope, status, source, description. `--user`, `--project`, `--json`, `--plugins` (adds skills of enabled plugins), `--enabled`, `--disabled`, `--all` (adds every plugin skill, including disabled plugins and plugins installed for other projects, and folders that are not skills) |
+| `skm list` (`ls`) | Table of skills: name, scope, status, source, description. `--user`, `--project`, `--json`, `--plugins` (adds skills of enabled plugins), `--claude-ai` (adds skills synced from your claude.ai account), `--enabled`, `--disabled` (both only ever list skills, never folders that aren't skills), `--all` (adds every plugin skill, including disabled plugins and plugins installed for other projects, every claude.ai skill, including other accounts', and folders that are not skills) |
 | `skm info <name>` | Full frontmatter, path, files, size, install source and commit |
 | `skm install <source>` (`add`) | Install from a folder, a `SKILL.md`, a `.zip`/`.skill` archive, a git URL or GitHub (see below) |
 | `skm uninstall <name...>` (`rm`) | Asks first (`-y` skips the question), then moves the skill to the trash. It is not hard-deleted |
@@ -151,10 +152,10 @@ Things to know:
    project's `.claude/skills/`, Claude Code runs the **user** one (enterprise > personal >
    project). `skm list` marks the project copy as `shadowed`, and `skm doctor` warns about it.
 3. **`synced` is reserved.** `~/.claude/skills/synced/` holds skills that Claude Code downloads
-   from your claude.ai account. `skm` never changes it and won't install anything under that name
-   (or `anthropic-skills…`). `skm list --all` shows it as `not a skill`. Any other folder without a
-   `SKILL.md` is left alone in the same way. Hidden entries such as `~/.claude/skills/.trash/` are
-   ignored.
+   from your claude.ai account (see [Skills synced from claude.ai](#skills-synced-from-claudeai)).
+   `skm` lists them but never changes that folder, and won't install anything under that name (or
+   `anthropic-skills…`). Any other folder without a `SKILL.md` shows up in `skm list --all` as
+   `not a skill` and is left alone. Hidden entries such as `~/.claude/skills/.trash/` are ignored.
 4. **Only the project root is managed.** Claude Code also loads `.claude/skills/` from parent
    folders up to the repo root, and from nested subfolders. `skm` manages only the one project
    root it detects (or the one you pass with `--project-dir`).
@@ -166,6 +167,50 @@ Things to know:
    where Claude Code cuts off the text shown in its skill list.
 7. Cowork and cloud sessions don't read `~/.claude/skills`, so local changes don't reach them.
 8. Legacy `.claude/commands/*.md` files are not managed.
+
+## Skills synced from claude.ai
+
+Claude Code downloads the skills enabled for your claude.ai account (your own, your organization's,
+and Anthropic's such as `pdf` and `xlsx`) into `~/.claude/skills/synced/` (or
+`$CLAUDE_CONFIG_DIR/skills/synced/`) and runs each as `/anthropic-skills:<name>` (also as `/<name>`
+when nothing else uses that name). `skm list --claude-ai` lists them, one row each:
+
+```text
+$ skm list --claude-ai
+NAME                            SCOPE      STATUS   SOURCE    DESCRIPTION
+route                           user       enabled  symlink   Route a task to the right Claude model…
+anthropic-skills:deep-research  claude.ai  enabled  3d0a8465  Use this skill when the user's prompt…
+anthropic-skills:pdf            claude.ai  enabled  3d0a8465  Use this skill whenever the user wants…
+
+1 skill · 1 enabled
+user    ~/.claude/skills
+2 claude.ai skills (signed-in account 3d0a8465) · read-only: change them on claude.ai
++ 9 claude.ai skills synced for 1 other claude.ai account hidden (use --all)
+```
+
+- **Hidden by default, like plugin skills.** They are read-only and mostly Anthropic's built-ins, so
+  plain `skm list` stays about the skills you manage and ends with
+  `+ 12 claude.ai skills not shown (run "skm list --claude-ai")`. `--all` includes them too.
+  `skm search` and `skm info` always cover them (`skm info anthropic-skills:pdf`, or `skm info pdf`
+  when no user or project skill is called `pdf`).
+- **One folder per account.** The sync keeps a folder per claude.ai organization/account
+  (`<org-uuid>_<account-uuid>`), each with a `manifest.json` and the skill folders. SOURCE shows the
+  first 8 characters of the org id (plus the account's when two folders share an org) so copies are
+  distinguishable. The account Claude Code is signed in to is read from `oauthAccount` in
+  `~/.claude.json` (or `$CLAUDE_CONFIG_DIR/.claude.json`); skills synced for any other account don't
+  load, so they're hidden unless `--all` and then dimmed with an `other-account` legend. If `skm`
+  can't tell which account is signed in (API-key sign-in, no config file), it shows every folder.
+  The same applies to plugins synced from claude.ai (`~/.claude/plugins/synced/`).
+- **Names and descriptions** come from `manifest.json`, falling back to the `SKILL.md` frontmatter.
+  The manifest only lists skills that are on for the account (turning one off on claude.ai removes it
+  at the next sync), so STATUS is `enabled`, or `disabled (sync off)` when
+  `"syncClaudeAiSkills": false` in user, local or managed settings stops Claude Code loading them.
+- **Read-only.** `skm disable/enable/uninstall/update/move/copy` on a synced skill exits with
+  a message and changes nothing: turn it off in your skills settings on claude.ai (or **Customize**
+  in the Claude desktop app), or set `"syncClaudeAiSkills": false` to stop loading all of them. Files
+  edited or deleted under `skills/synced/` are overwritten by the next sync. The Claude Code docs
+  describe `skillOverrides` for personal, project and bundled skills but not for synced ones, so `skm`
+  doesn't write it for them. `skm doctor` doesn't check them (you can't fix them locally).
 
 ## Plugins (verified against the Claude Code docs, Sept 2026)
 
@@ -181,8 +226,10 @@ in its settings files, not from `installed_plugins.json`. `skm` reads it the sam
 - **Managed settings** are read from `managed-settings.json` and `managed-settings.d/*.json` in
   `/Library/Application Support/ClaudeCode/` (macOS) or `/etc/claude-code/` (Linux). MDM profiles and
   server-managed settings from claude.ai are not visible to `skm`.
-- **Plugins synced from claude.ai** show up as `<name>@synced` (scope `synced`). They load only in
-  sessions signed in with your claude.ai account, and `syncClaudeAiPlugins: false` turns them all off.
+- **Plugins synced from claude.ai** show up as `<name>@synced` with SCOPE `claude.ai` (`--json` keeps
+  `scope: "synced"` and adds `scopeLabel: "claude.ai"`). They load only in sessions signed in with
+  your claude.ai account, only from that account's sync folder (others are dimmed, `otherAccount:
+  true` in JSON), and `syncClaudeAiPlugins: false` turns them all off.
 - **Plugins installed for another project** (install scope `project`/`local` with a different
   project path) show that project's path in SCOPE (a `local` install adds ` (local)`) and are dimmed,
   with a legend line under the table. Their STATUS is still `enabled`/`disabled`: what Claude Code
@@ -200,7 +247,7 @@ A change goes to user settings, or to `.claude/settings.local.json` when a proje
 decides that plugin (so nothing committed changes).
 
 In `skm list --plugins` / `--all`, a plugin skill's SCOPE is where its plugin is installed (`user`,
-`synced` or a project path; SOURCE names the plugin) and its STATUS is `enabled` or
+`claude.ai` or a project path; SOURCE names the plugin) and its STATUS is `enabled` or
 `disabled (plugin off)`. By default only skills of plugins that load here are listed, followed by
 lines such as `+ 42 skills from 4 disabled plugins hidden (use --all)` and
 `+ 23 skills from 2 plugins installed for other projects hidden (use --all)`.

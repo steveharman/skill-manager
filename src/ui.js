@@ -184,8 +184,11 @@ export function clipPath(p, max = 28) {
 
 export const SCOPE_WIDTH = 28;
 
+/** Display label for a scope value that isn't a path (`synced` → `claude.ai`; JSON keeps the raw value). */
+export const SCOPE_LABELS = { synced: 'claude.ai' };
+
 /**
- * Where something is installed, in words: `user`, `synced`, `managed`, or for a project install just the
+ * Where something is installed, in words: `user`, `claude.ai` (scope value `synced`), `managed`, or for a project install just the
  * project path (e.g. `~/carememo`); a local (settings.local) install adds " (local)".
  * @param {string} scope
  * @param {string|null} [projectPath]
@@ -195,7 +198,7 @@ export function scopeLabel(scope, projectPath) {
     const suffix = scope === 'local' ? ' (local)' : '';
     return clipPath(homePath(projectPath), SCOPE_WIDTH - suffix.length) + suffix;
   }
-  return scope;
+  return SCOPE_LABELS[scope] || scope;
 }
 
 /** scopeLabel, colored: user cyan, project paths magenta, anything else blue. */
@@ -214,5 +217,8 @@ export const entryScopeLabel = (e) =>
 
 /** Legend under a table with dimmed rows for installs that belong to another project. */
 export const OTHER_PROJECT_LEGEND = `${pc.isColorSupported ? 'dimmed' : 'other-project rows'}: installed for another project — loads only when Claude Code runs there`;
+
+/** Legend under a table with dimmed claude.ai rows from an account Claude Code is not signed in to. */
+export const OTHER_ACCOUNT_LEGEND = `${pc.isColorSupported ? 'dimmed' : 'other-account rows'}: synced for another claude.ai account or organization — loads only when Claude Code is signed in to it`;
 
 export const plural = (n, word, pluralWord = word + 's') => `${n} ${n === 1 ? word : pluralWord}`;

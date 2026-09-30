@@ -67,6 +67,7 @@ describe('scope resolution', () => {
 
   test('bare list flags are rewritten to "list <flags>", anything else is left alone', () => {
     assert.deepEqual(bareListArgs(['--plugins']), ['list', '--plugins']);
+    assert.deepEqual(bareListArgs(['--claude-ai']), ['list', '--claude-ai']);
     assert.deepEqual(bareListArgs(['--no-input', '-a', '--json']), ['--no-input', 'list', '-a', '--json']);
     assert.deepEqual(bareListArgs(['--project-dir', '/x', '--json']), ['list', '--project-dir', '/x', '--json']);
     for (const args of [['list', '--plugins'], ['--help'], ['-v'], ['--plugins', '--bogus'], ['--no-input'], ['doctor', '--json']])

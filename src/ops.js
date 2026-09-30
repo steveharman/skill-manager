@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { copySkillDir, exists, hashDir, movePath, readJson, timestamp, writeJsonAtomic } from './fsutil.js';
 import { getRecord, removeRecord, setRecord } from './state.js';
 import { findSkillFile, pluginSkillError } from './skills.js';
+import { syncedSkillError } from './synced.js';
 import { SkmError, isInteractive, prompt, scopeColor } from './ui.js';
 
 /** Set the frontmatter `name:` of a skill folder (used by install --name). */
@@ -105,6 +106,7 @@ export function describeScope(scope) {
 
 export function assertManaged(entry, action) {
   if (entry.scope === 'plugin') throw pluginSkillError(entry, action);
+  if (entry.scope === 'synced') throw syncedSkillError(entry, action);
   if (entry.kind === 'not-skill') throw new SkmError(`"${entry.dirName}" is not a skill; leaving it alone.`);
 }
 

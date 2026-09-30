@@ -2,7 +2,7 @@
 import pc from 'picocolors';
 import { noProjectError } from '../context.js';
 import { decidedByLabel, discoverPlugins, settingsFileFor, settingsLayers, splitId, writeEnabledPlugins } from '../plugins.js';
-import { OTHER_PROJECT_LEGEND, SkmError, didYouMean, isInteractive, out, plural, prompt, scopeColor, scopeLabel, table, tildify } from '../ui.js';
+import { OTHER_ACCOUNT_LEGEND, OTHER_PROJECT_LEGEND, SkmError, didYouMean, isInteractive, out, plural, prompt, scopeColor, scopeLabel, table, tildify } from '../ui.js';
 
 /** STATUS is only ever enabled/disabled; another project's install is dimmed, its location is in SCOPE. */
 const stateColor = (p) =>
@@ -10,10 +10,10 @@ const stateColor = (p) =>
 
 function pluginJson(p) {
   return {
-    id: p.id, name: p.name, marketplace: p.marketplace, scope: p.scope, projectPath: p.projectPath || undefined,
+    id: p.id, name: p.name, marketplace: p.marketplace, scope: p.scope, scopeLabel: scopeLabel(p.scope), projectPath: p.projectPath || undefined,
     state: p.state, enabled: p.enabled, loadsHere: p.applicable && p.enabled, skills: p.skillDirs.length, version: p.version || undefined,
     decidedBy: { scope: p.decidedBy.scope, file: p.decidedBy.file || undefined, value: p.decidedBy.value, reason: p.decidedBy.reason },
-    installPath: p.installPath,
+    installPath: p.installPath, bucket: p.bucket, otherAccount: p.scope === 'synced' ? Boolean(p.otherAccount) : undefined,
   };
 }
 
@@ -44,13 +44,16 @@ export async function pluginListCommand(ctx, opts = {}) {
     noTruncate: true, // the deciding file is the point of this column
   }));
   const here = plugins.filter((p) => p.applicable);
-  const elsewhere = plugins.length - here.length;
+  const accounts = plugins.filter((p) => p.otherAccount).length;
+  const elsewhere = plugins.length - here.length - accounts;
   const count = (st) => here.filter((p) => p.state === st).length;
   const parts = [plural(plugins.length, 'plugin'), `${count('enabled')} enabled`, `${count('disabled')} disabled`];
   if (elsewhere) parts.push(`${elsewhere} installed for other projects`);
+  if (accounts) parts.push(`${accounts} synced for other claude.ai accounts`);
   out.blank();
   out.log(pc.dim(parts.join(' · ')));
   if (elsewhere) out.log(pc.dim(OTHER_PROJECT_LEGEND));
+  if (accounts) out.log(pc.dim(OTHER_ACCOUNT_LEGEND));
   out.log(pc.dim(`Change with "skm plugin enable|disable <name>" (writes enabledPlugins; -p project, --local this machine only).`));
 }
 

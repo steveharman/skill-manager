@@ -47,13 +47,22 @@ describe('list', () => {
   });
 
   test('non-skill folders are hidden by default and flagged with --all', () => {
-    makeSyncedDir(sb.userSkills);
+    mkdirSync(join(sb.userSkills, 'junk', 'stuff'), { recursive: true });
     writeSkill(join(sb.userSkills, 'real'), { name: 'real' });
     assert.deepEqual(json(sb.run(['list', '--json'])).map((e) => e.name), ['real']);
     const all = json(sb.run(['list', '--all', '--json']));
-    const synced = all.find((e) => e.dirName === 'synced');
-    assert.equal(synced.status, 'not-skill');
-    assert.match(sb.run(['list', '--all']).stdout, /synced\s+user\s+not a skill/);
+    const junk = all.find((e) => e.dirName === 'junk');
+    assert.equal(junk.status, 'not-skill');
+    assert.match(sb.run(['list', '--all']).stdout, /junk\s+user\s+not a skill/);
+  });
+
+  test('--enabled / --disabled leave out rows that are not skills', () => {
+    mkdirSync(join(sb.userSkills, 'junk', 'stuff'), { recursive: true });
+    writeSkill(join(sb.userSkills, 'on'), { name: 'on' });
+    writeSkill(join(sb.userDisabled, 'off'), { name: 'off' });
+    assert.deepEqual(json(sb.run(['list', '--all', '--enabled', '--json'])).map((e) => e.dirName), ['on']);
+    assert.deepEqual(json(sb.run(['list', '--all', '--disabled', '--json'])).map((e) => e.dirName), ['off']);
+    assert.doesNotMatch(sb.run(['list', '--all', '--enabled']).stdout, /junk|not a skill/);
   });
 
   test('--project outside a project gives a helpful error', () => {
@@ -387,7 +396,8 @@ describe('non-skill folders are never touched', () => {
     assert.deepEqual(snapshot(synced), before);
     const rm = sb.run(['rm', 'synced', '-y']);
     assert.equal(rm.code, 1);
-    assert.match(rm.stderr, /not a skill/);
+    assert.match(rm.stderr, /claude\.ai/);
+    assert.match(rm.stderr, /leaves it alone/);
     assert.match(sb.run(['install', src, '--name', 'synced']).stderr, /reserved/);
   });
 });

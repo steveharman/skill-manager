@@ -5,12 +5,13 @@ import { parseFrontmatter } from './frontmatter.js';
 import { readJson } from './fsutil.js';
 import { discoverPlugins, loadsHere } from './plugins.js';
 import { loadState } from './state.js';
+import { matchesSynced, scanSynced, syncedFolderError, syncedSkillError } from './synced.js';
 import { SkmError, didYouMean, entryScope, isInteractive, prompt, tildify } from './ui.js';
 
 /**
  * @typedef {object} Entry
  * @property {'skill'|'not-skill'|'broken-link'} kind
- * @property {'user'|'project'|'plugin'} scope
+ * @property {'user'|'project'|'plugin'|'synced'} scope   'synced': from claude.ai (see synced.js; shown as "claude.ai")
  * @property {'enabled'|'disabled'} status
  * @property {string} dirName   folder name on disk
  * @property {string} name      command name (frontmatter name, else folder name; plugin skills are plugin:skill)
@@ -116,12 +117,12 @@ export function scanScope(scope) {
     for (const dirName of listDir(base)) {
       const p = join(base, dirName);
       if (!isDirLike(p)) continue;
+      // ~/.claude/skills/synced holds claude.ai skills; they are listed one by one via scanSynced, not as a folder.
+      if (scope.scope === 'user' && status === 'enabled' && dirName === 'synced') continue;
       const e = entryFor(p, dirName, scope.scope, status);
       if (!e) continue;
       e.record = state.skills[dirName] || null;
       e.projectRoot = scope.scope === 'project' ? scope.root : null;
-      if (e.kind === 'not-skill' && dirName === 'synced' && scope.scope === 'user')
-        e.note = 'claude.ai synced skills (managed by Claude Code)';
       entries.push(e);
     }
   }
@@ -188,17 +189,20 @@ export function readSkillOverrides(ctx) {
 /**
  * Everything skill-manager knows about, with shadowing and settings overrides applied.
  * @param {import('./context.js').Context} ctx
- * @param {{scopes?: import('./context.js').ScopeInfo[], plugins?: boolean}} [opts]
+ * @param {{scopes?: import('./context.js').ScopeInfo[], plugins?: boolean, synced?: boolean}} [opts]
  * @returns {Entry[]}
  */
-export function collect(ctx, { scopes, plugins = false } = {}) {
+export function collect(ctx, { scopes, plugins = false, synced = false } = {}) {
   const all = [];
   const scopeList = scopes || [ctx.user, ...(ctx.project ? [ctx.project] : [])];
   for (const s of scopeList) all.push(...scanScope(s));
   if (plugins) all.push(...scanPlugins(ctx));
+  if (synced) all.push(...scanSynced(ctx));
   const overrides = readSkillOverrides(ctx);
-  // skillOverrides does not apply to plugin skills (Claude Code docs), so only user/project skills get one.
-  for (const e of all) if (e.kind === 'skill' && e.scope !== 'plugin' && overrides[e.name]) e.override = overrides[e.name];
+  // skillOverrides applies to user/project skills only: not to plugin skills (Claude Code docs), and the docs
+  // never name it for claude.ai-synced skills, which are switched on claude.ai.
+  for (const e of all)
+    if (e.kind === 'skill' && (e.scope === 'user' || e.scope === 'project') && overrides[e.name]) e.override = overrides[e.name];
   // Claude Code precedence: personal (user) skills win over project skills with the same name.
   const userNames = new Set(
     (scopes && !scopes.includes(ctx.user) ? scanScope(ctx.user) : all)
@@ -238,6 +242,14 @@ export async function resolveSkill(ctx, name, opts = {}) {
   if (found.length === 1) return opts.multiple ? found : found[0];
   if (found.length > 1 && opts.multiple && !isInteractive()) return found;
   if (found.length === 0) {
+    // Skills synced from claude.ai: readable (info) but never changed here.
+    const synced = !opts.project || opts.user ? scanSynced(ctx).filter((e) => matchesSynced(e, name)) : [];
+    if (synced.length) {
+      if (opts.action) throw syncedSkillError(synced.find((e) => e.active) || synced[0], opts.action);
+      return opts.multiple ? synced : synced.find((e) => e.active) || synced[0];
+    }
+    if (name.toLowerCase() === 'synced' && (!scopes || scopes.includes(ctx.user)))
+      throw syncedFolderError(tildify(join(ctx.user.skillsDir, 'synced')));
     const nonSkill = all.find((e) => e.kind === 'not-skill' && e.dirName.toLowerCase() === name.toLowerCase());
     if (nonSkill)
       throw new SkmError(`"${name}" is not a skill (no SKILL.md) — skill-manager leaves it alone.`, {
@@ -245,7 +257,7 @@ export async function resolveSkill(ctx, name, opts = {}) {
       });
     const plugin = scanPlugins(ctx).find((e) => matches(e, name) || e.dirName.toLowerCase() === name.toLowerCase());
     if (plugin) throw pluginSkillError(plugin, opts.action);
-    const everything = collect(ctx).filter((e) => e.kind === 'skill');
+    const everything = collect(ctx, { synced: true }).filter((e) => e.kind === 'skill');
     const sugg = didYouMean(name, everything.flatMap((e) => [e.dirName, e.name]));
     const where = scopes ? `${scopes[0].scope} scope` : 'user or project scope';
     const hint = sugg.length ? [`Did you mean: ${sugg.join(', ')}?`] : [];

@@ -99,6 +99,7 @@ export async function runMenu() {
     const choice = await prompt.select(`${plural(skills.length, 'skill')}${pluginSummary} · ${where}\nWhat would you like to do?`, [
       { value: 'list', label: 'List skills' },
       { value: 'plugins', label: 'List plugin skills', hint: 'skills from enabled plugins' },
+      { value: 'claudeAi', label: 'List claude.ai skills', hint: 'synced from your claude.ai account (read-only)' },
       { value: 'toggle', label: 'Enable / disable skills' },
       { value: 'pluginList', label: 'List plugins', hint: 'every installed plugin and what decides it' },
       { value: 'pluginToggle', label: 'Enable / disable plugins' },
@@ -118,7 +119,10 @@ export async function runMenu() {
       out.blank();
       switch (choice) {
         case 'list':
-          await listCommand(ctx, { pluginHint: 'choose "List plugin skills" in the menu' });
+          await listCommand(ctx, { pluginHint: 'choose "List plugin skills" in the menu', claudeAiHint: 'choose "List claude.ai skills" in the menu' });
+          break;
+        case 'claudeAi':
+          await listCommand(ctx, { claudeAi: true });
           break;
         case 'plugins':
           await listCommand(ctx, { plugins: true, pluginAllHint: 'turn them on with "Enable / disable plugins"' });
