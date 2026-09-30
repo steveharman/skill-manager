@@ -52,7 +52,7 @@ export function findProjectRoot(start, env = process.env) {
  * @typedef {{scope: 'user'|'project', root: string, claudeDir: string, skillsDir: string,
  *   disabledDir: string, stateFile: string, settingsFiles: string[]}} ScopeInfo
  * @typedef {{env: object, cwd: string, home: string, user: ScopeInfo, project: ScopeInfo|null,
- *   projectExplicit: boolean, configDir: string, pluginsDir: string, trashDir: string}} Context
+ *   projectExplicit: boolean, configDir: string, pluginsDir: string, trashDir: string, backupDir: string}} Context
  */
 
 function scopeInfo(scope, claudeDir, root) {
@@ -99,6 +99,7 @@ export function createContext({ env = process.env, cwd = process.cwd(), projectD
     projectExplicit: Boolean(projectDir),
     pluginsDir: join(configDir, 'plugins'),
     trashDir: join(configDir, 'skill-manager', 'trash'),
+    backupDir: join(configDir, 'skill-manager', 'backups'),
   };
 }
 

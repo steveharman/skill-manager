@@ -15,9 +15,11 @@ export function sandbox() {
   mkdirSync(join(home, '.claude', 'skills'), { recursive: true });
   mkdirSync(join(project, '.git'), { recursive: true });
   mkdirSync(src, { recursive: true });
-  const env = { PATH: process.env.PATH, HOME: home, SKM_NO_INPUT: '1', NO_COLOR: '1', TMPDIR: process.env.TMPDIR || tmpdir() };
+  const managed = join(root, 'managed'); // never the machine's real managed-settings.json
+  const env = { PATH: process.env.PATH, HOME: home, SKM_NO_INPUT: '1', NO_COLOR: '1', TMPDIR: process.env.TMPDIR || tmpdir(),
+    SKM_MANAGED_SETTINGS_DIR: managed };
   return {
-    root, home, project, src, env,
+    root, home, project, src, env, managed,
     userSkills: join(home, '.claude', 'skills'),
     userDisabled: join(home, '.claude', 'skills-disabled'),
     projectSkills: join(project, '.claude', 'skills'),
@@ -86,3 +88,36 @@ export function gitRepo(dir, files) {
 }
 
 export const skillMd = (name, description = `The ${name} skill.`) => `---\nname: ${name}\ndescription: ${description}\n---\n\nBody of ${name}.\n`;
+
+/**
+ * Record a plugin install the way Claude Code does (installed_plugins.json + a cache folder with skills).
+ * @returns {string} install path
+ */
+export function installPlugin(home, id, { scope = 'user', projectPath, skills = ['s1'], version = '1.0.0', manifest } = {}) {
+  const [name, marketplace] = id.split('@');
+  const pluginsDir = join(home, '.claude', 'plugins');
+  const installPath = join(pluginsDir, 'cache', marketplace, name, version);
+  for (const s of skills) writeSkill(join(installPath, 'skills', s), { name: s });
+  if (manifest) {
+    mkdirSync(join(installPath, '.claude-plugin'), { recursive: true });
+    writeFileSync(join(installPath, '.claude-plugin', 'plugin.json'), JSON.stringify({ name, ...manifest }));
+  }
+  const file = join(pluginsDir, 'installed_plugins.json');
+  let data = { version: 2, plugins: {} };
+  try {
+    data = JSON.parse(readFileSync(file, 'utf8'));
+  } catch {
+    /* first install */
+  }
+  (data.plugins[id] ||= []).push({ scope, installPath, version, ...(projectPath ? { projectPath } : {}) });
+  mkdirSync(pluginsDir, { recursive: true });
+  writeFileSync(file, JSON.stringify(data, null, 2));
+  return installPath;
+}
+
+/** Write a settings.json-style file. */
+export function writeSettings(file, data, text) {
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, text ?? JSON.stringify(data, null, 2) + '\n');
+  return file;
+}

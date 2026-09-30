@@ -3,7 +3,7 @@ import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'no
 import { join } from 'node:path';
 import { copySkillDir, exists, hashDir, movePath, readJson, timestamp, writeJsonAtomic } from './fsutil.js';
 import { getRecord, removeRecord, setRecord } from './state.js';
-import { findSkillFile } from './skills.js';
+import { findSkillFile, pluginSkillError } from './skills.js';
 import { SkmError, isInteractive, prompt, scopeColor } from './ui.js';
 
 /** Set the frontmatter `name:` of a skill folder (used by install --name). */
@@ -104,10 +104,7 @@ export function describeScope(scope) {
 }
 
 export function assertManaged(entry, action) {
-  if (entry.scope === 'plugin')
-    throw new SkmError(`Cannot ${action} "${entry.name}": it belongs to the plugin ${entry.plugin}.`, {
-      hint: 'Manage plugin skills with /plugin inside Claude Code.',
-    });
+  if (entry.scope === 'plugin') throw pluginSkillError(entry, action);
   if (entry.kind === 'not-skill') throw new SkmError(`"${entry.dirName}" is not a skill; leaving it alone.`);
 }
 

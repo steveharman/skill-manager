@@ -103,7 +103,7 @@ export function truncate(s, max) {
  * Render a simple aligned table. The last column absorbs the remaining width.
  * @param {string[]} headers
  * @param {string[][]} rows  cells may contain ANSI colors (except the last column, which is truncated raw)
- * @param {{lastRaw?: (row: number) => string, lastColor?: (s: string, row: number) => string}} [opts]
+ * @param {{lastRaw?: (row: number) => string, lastColor?: (s: string, row: number) => string, noTruncate?: boolean}} [opts]
  */
 export function table(headers, rows, opts = {}) {
   const width = process.stdout.columns || 120;
@@ -119,7 +119,8 @@ export function table(headers, rows, opts = {}) {
     cells
       .map((c, i) => {
         if (i < n - 1) return pad(c, widths[i]);
-        const raw = isHeader ? c : truncate(opts.lastRaw ? opts.lastRaw(rowIdx) : c, lastWidth);
+        const full = isHeader ? c : opts.lastRaw ? opts.lastRaw(rowIdx) : c;
+        const raw = isHeader || opts.noTruncate ? full : truncate(full, lastWidth);
         return isHeader ? c : opts.lastColor ? opts.lastColor(raw, rowIdx) : raw;
       })
       .join(' '.repeat(gap))

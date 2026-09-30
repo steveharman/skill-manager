@@ -8,6 +8,8 @@ import { newCommand, transferCommand, trashCommand, uninstallCommand } from './c
 import { dirFor } from './ops.js';
 import { movePath, exists } from './fsutil.js';
 import { collect } from './skills.js';
+import { discoverPlugins } from './plugins.js';
+import { applyPluginChanges, pluginListCommand } from './commands/plugin.js';
 import { basename } from 'node:path';
 import { SkmError, clack, out, plural, printError, prompt, tildify } from './ui.js';
 
@@ -52,16 +54,54 @@ async function toggleScreen(ctx) {
   if (!changed) out.info('No changes.');
 }
 
+/**
+ * One screen to flip plugins on and off. A change goes to the file that currently decides the plugin when
+ * that is a project file (as .claude/settings.local.json, so nothing committed changes), else to user settings.
+ */
+async function pluginToggleScreen(ctx) {
+  const plugins = [...new Map(discoverPlugins(ctx).filter((p) => p.applicable).map((p) => [p.id, p])).values()];
+  if (!plugins.length) return out.info('No plugins installed here.');
+  const chosen = await prompt.multiselect(
+    'Enabled plugins (space toggles, enter saves):',
+    plugins.map((p) => ({
+      value: p.id, label: p.id,
+      hint: `${plural(p.skillDirs.length, 'skill')} · ${p.scope}${p.decidedBy.scope === 'managed' ? ' · managed, locked' : ''}`,
+    })),
+    plugins.filter((p) => p.enabled).map((p) => p.id),
+  );
+  const want = new Set(chosen);
+  const byTarget = { user: {}, local: {} };
+  for (const p of plugins) {
+    const to = want.has(p.id);
+    if (to === p.enabled) continue;
+    if (p.decidedBy.scope === 'managed') {
+      out.warn(`Skipped ${p.id}: managed settings decide it.`);
+      continue;
+    }
+    byTarget[p.decidedBy.scope === 'project' || p.decidedBy.scope === 'local' ? 'local' : 'user'][p.id] = to;
+  }
+  let changed = 0;
+  for (const [target, changes] of Object.entries(byTarget))
+    if (Object.keys(changes).length) changed += applyPluginChanges(ctx, changes, target).changed.length;
+  if (!changed) out.info('No changes.');
+}
+
 export async function runMenu() {
   clack.intro(pc.bold(' skill-manager '));
   for (;;) {
     const ctx = createContext();
     const skills = collect(ctx).filter((e) => e.kind === 'skill');
     const where = ctx.project ? `user + project ${pc.dim(basename(ctx.project.root))}` : 'user scope (not in a project)';
-    const choice = await prompt.select(`${plural(skills.length, 'skill')} · ${where}\nWhat would you like to do?`, [
+    const plugins = discoverPlugins(ctx);
+    const pluginIds = new Set(plugins.filter((p) => p.applicable).map((p) => p.id));
+    const onIds = new Set(plugins.filter((p) => p.state === 'enabled').map((p) => p.id));
+    const pluginSummary = pluginIds.size ? ` · ${onIds.size}/${plural(pluginIds.size, 'plugin')} on` : '';
+    const choice = await prompt.select(`${plural(skills.length, 'skill')}${pluginSummary} · ${where}\nWhat would you like to do?`, [
       { value: 'list', label: 'List skills' },
-      { value: 'plugins', label: 'List plugin skills (read-only)' },
+      { value: 'plugins', label: 'List plugin skills', hint: 'skills from enabled plugins' },
       { value: 'toggle', label: 'Enable / disable skills' },
+      { value: 'pluginList', label: 'List plugins', hint: 'every installed plugin and what decides it' },
+      { value: 'pluginToggle', label: 'Enable / disable plugins' },
       { value: 'install', label: 'Install a skill', hint: 'folder, archive, git URL, owner/repo' },
       { value: 'new', label: 'Create a new skill' },
       { value: 'info', label: 'Show details of a skill' },
@@ -81,7 +121,13 @@ export async function runMenu() {
           await listCommand(ctx, { pluginHint: 'choose "List plugin skills" in the menu' });
           break;
         case 'plugins':
-          await listCommand(ctx, { plugins: true });
+          await listCommand(ctx, { plugins: true, pluginAllHint: 'turn them on with "Enable / disable plugins"' });
+          break;
+        case 'pluginList':
+          await pluginListCommand(ctx, {});
+          break;
+        case 'pluginToggle':
+          await pluginToggleScreen(ctx);
           break;
         case 'toggle':
           await toggleScreen(ctx);

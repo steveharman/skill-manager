@@ -1,8 +1,9 @@
 // Discovering skills on disk and resolving a name typed by the user to one of them.
 import { lstatSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { parseFrontmatter } from './frontmatter.js';
 import { readJson } from './fsutil.js';
+import { discoverPlugins } from './plugins.js';
 import { loadState } from './state.js';
 import { SkmError, didYouMean, isInteractive, prompt, scopeColor, tildify } from './ui.js';
 
@@ -18,7 +19,9 @@ import { SkmError, didYouMean, isInteractive, prompt, scopeColor, tildify } from
  * @property {ReturnType<typeof parseFrontmatter>|null} parsed
  * @property {string} description
  * @property {string|null} symlinkTarget
- * @property {string} [plugin]
+ * @property {string} [plugin]  plugin id (name@marketplace) for plugin skills
+ * @property {import('./plugins.js').Plugin} [pluginInfo]
+ * @property {'enabled'|'disabled'|'project-only'} [pluginState]
  * @property {object|null} record   skill-manager.json record
  * @property {string|null} override skillOverrides value from settings
  * @property {string|null} shadowedBy
@@ -123,32 +126,49 @@ export function scanScope(scope) {
   return entries;
 }
 
-/** Skills shipped by installed plugins (read-only). */
-export function scanPlugins(ctx) {
-  const installed = readJson(join(ctx.pluginsDir, 'installed_plugins.json'), null);
-  const plugins = installed?.plugins;
-  if (!plugins || typeof plugins !== 'object') return [];
+/**
+ * Skills shipped by installed plugins (read-only), one entry per skill per install record.
+ * `status` is 'enabled' only when the plugin is on where skm runs; `pluginState` says why not.
+ * @param {import('./context.js').Context} ctx
+ * @param {import('./plugins.js').Plugin[]} [plugins]
+ */
+export function scanPlugins(ctx, plugins = discoverPlugins(ctx)) {
   const entries = [];
-  const seen = new Set();
-  for (const [key, installs] of Object.entries(plugins)) {
-    const pluginName = key.split('@')[0];
-    for (const inst of Array.isArray(installs) ? installs : [installs]) {
-      if (!inst?.installPath) continue;
-      if (inst.scope && inst.scope !== 'user' && inst.projectPath && inst.projectPath !== ctx.project?.root) continue;
-      const skillsDir = join(inst.installPath, 'skills');
-      for (const dirName of listDir(skillsDir)) {
-        const p = join(skillsDir, dirName);
-        if (seen.has(p) || !isDirLike(p)) continue;
-        seen.add(p);
-        const e = entryFor(p, dirName, 'plugin', 'enabled');
-        if (!e || e.kind !== 'skill') continue;
-        e.plugin = key;
-        e.name = `${pluginName}:${e.name}`;
-        entries.push(e);
-      }
+  for (const plugin of plugins) {
+    for (const p of plugin.skillDirs) {
+      const e = entryFor(p, basename(p), 'plugin', plugin.state === 'enabled' ? 'enabled' : 'disabled');
+      if (!e || e.kind !== 'skill') continue;
+      e.plugin = plugin.id;
+      e.pluginInfo = plugin;
+      e.pluginState = plugin.state;
+      e.name = `${plugin.skillPrefix}:${e.name}`;
+      entries.push(e);
     }
   }
-  return entries.sort((a, b) => a.name.localeCompare(b.name));
+  return entries.sort((a, b) => a.name.localeCompare(b.name) || a.plugin.localeCompare(b.plugin));
+}
+
+/**
+ * Error for trying to change a single plugin skill. Claude Code's skillOverrides does not apply to
+ * plugin skills (code.claude.com/docs/en/skills), so the only switch is the whole plugin.
+ */
+export function pluginSkillError(entry, action) {
+  const { name } = entry.pluginInfo || { name: entry.plugin.split('@')[0] };
+  const already = (action === 'disable') === (entry.pluginState !== 'enabled');
+  if (already && (action === 'enable' || action === 'disable'))
+    return new SkmError(`"${entry.name}" comes from the plugin ${entry.plugin}, which is already ${action}d here.`, {
+      hint: "Claude Code's skillOverrides setting does not apply to plugin skills; see \"skm plugin list\" for what decides each plugin.",
+    });
+  if (action === 'enable' || action === 'disable')
+    return new SkmError(`"${entry.name}" comes from the plugin ${entry.plugin}; single plugin skills can't be ${action}d.`, {
+      hint: [
+        "Claude Code's skillOverrides setting does not apply to plugin skills, so a plugin is on or off as a whole.",
+        `Turn the whole plugin ${action === 'enable' ? 'on' : 'off'}: skm plugin ${action} ${entry.plugin}`,
+      ],
+    });
+  return new SkmError(`"${entry.name}" comes from the plugin ${entry.plugin} and is read-only.`, {
+    hint: [`Switch the plugin with "skm plugin disable ${name}", or remove it with "claude plugin uninstall ${entry.plugin}".`],
+  });
 }
 
 /** Merged skillOverrides from user, project and local settings (later wins). */
@@ -174,7 +194,8 @@ export function collect(ctx, { scopes, plugins = false } = {}) {
   for (const s of scopeList) all.push(...scanScope(s));
   if (plugins) all.push(...scanPlugins(ctx));
   const overrides = readSkillOverrides(ctx);
-  for (const e of all) if (e.kind === 'skill' && overrides[e.name]) e.override = overrides[e.name];
+  // skillOverrides does not apply to plugin skills (Claude Code docs), so only user/project skills get one.
+  for (const e of all) if (e.kind === 'skill' && e.scope !== 'plugin' && overrides[e.name]) e.override = overrides[e.name];
   // Claude Code precedence: personal (user) skills win over project skills with the same name.
   const userNames = new Set(
     (scopes && !scopes.includes(ctx.user) ? scanScope(ctx.user) : all)
@@ -220,10 +241,7 @@ export async function resolveSkill(ctx, name, opts = {}) {
         hint: nonSkill.note ? `${tildify(nonSkill.path)}: ${nonSkill.note}` : tildify(nonSkill.path),
       });
     const plugin = scanPlugins(ctx).find((e) => matches(e, name) || e.dirName.toLowerCase() === name.toLowerCase());
-    if (plugin)
-      throw new SkmError(`"${plugin.name}" comes from the plugin ${plugin.plugin} and is read-only.`, {
-        hint: 'Manage plugin skills with /plugin inside Claude Code.',
-      });
+    if (plugin) throw pluginSkillError(plugin, opts.action);
     const everything = collect(ctx).filter((e) => e.kind === 'skill');
     const sugg = didYouMean(name, everything.flatMap((e) => [e.dirName, e.name]));
     const where = scopes ? `${scopes[0].scope} scope` : 'user or project scope';

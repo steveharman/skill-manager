@@ -6,6 +6,7 @@ import { doctorCommand } from './commands/doctor.js';
 import { installCommand, updateCommand } from './commands/install.js';
 import { infoCommand, listCommand, searchCommand } from './commands/list.js';
 import { disableCommand, enableCommand, newCommand, restoreCommand, transferCommand, trashCommand, uninstallCommand } from './commands/manage.js';
+import { pluginDisableCommand, pluginEnableCommand, pluginListCommand } from './commands/plugin.js';
 import { printError } from './ui.js';
 
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
@@ -33,14 +34,14 @@ export function normalizeArgv(argv) {
   return outArgs;
 }
 
-function action(fn) {
+function action(fn, { projectDirImpliesProject = true } = {}) {
   return async (...args) => {
     const cmd = args.pop();
     const opts = cmd.optsWithGlobals();
     if (opts.input === false) process.env.SKM_NO_INPUT = '1';
     try {
       const ctx = createContext({ projectDir: opts.projectDir });
-      if (opts.projectDir) opts.project = opts.project || !opts.user;
+      if (opts.projectDir && projectDirImpliesProject) opts.project = opts.project || !opts.user;
       await fn(ctx, ...args.slice(0, -1), opts);
     } catch (e) {
       process.exitCode = printError(e);
@@ -66,11 +67,11 @@ export function buildProgram() {
 
   scoped(program.command('list').alias('ls').description('list installed skills (both scopes by default)'))
     .option('--json', 'machine-readable output')
-    .option('--plugins', 'also list read-only skills from installed plugins')
-    .option('-a, --all', 'include plugin skills and non-skill folders (like synced/)')
+    .option('--plugins', 'also list skills from enabled plugins (read-only)')
+    .option('-a, --all', 'include every plugin skill (also from disabled plugins and other projects) and non-skill folders (like synced/)')
     .option('--enabled', 'only enabled skills')
     .option('--disabled', 'only disabled skills')
-    .addHelpText('after', examples(['skm list', 'skm ls --user', 'skm list --project --json', 'skm list --all']))
+    .addHelpText('after', examples(['skm list', 'skm ls --user', 'skm list --project --json', 'skm list --plugins', 'skm list --all']))
     .action(action((ctx, opts) => listCommand(ctx, opts)));
 
   scoped(program.command('info').argument('<name>', 'skill name').description('show frontmatter, location, files and source of a skill'))
@@ -153,6 +154,29 @@ export function buildProgram() {
     .addHelpText('after', examples(['skm search pdf', 'skm find deploy --user']))
     .action(action((ctx, term, opts) => searchCommand(ctx, term, opts)));
 
+  const plugin = program.command('plugin').alias('plugins')
+    .description('list installed plugins and switch them on or off (enabledPlugins in settings.json)');
+  plugin.command('list', { isDefault: true }).alias('ls').description('one row per installed plugin: scope, status, skills, version, deciding settings file')
+    .option('--json', 'machine-readable output')
+    .option('--project-dir <path>', 'evaluate for this project root instead of the current one')
+    .addHelpText('after', examples(['skm plugin list', 'skm plugins --json']))
+    .action(action((ctx, opts) => pluginListCommand(ctx, opts), { projectDirImpliesProject: false }));
+  for (const [verb, fn] of [['enable', pluginEnableCommand], ['disable', pluginDisableCommand]]) {
+    plugin.command(verb).argument('[name...]', 'plugin name or name@marketplace; omit to pick interactively')
+      .description(`${verb} whole plugins by writing enabledPlugins (user settings by default)`)
+      .option('-g, --user', 'write ~/.claude/settings.json (default)')
+      .option('-p, --project', 'write <project>/.claude/settings.json (shared with the repo)')
+      .option('--local', 'write <project>/.claude/settings.local.json (this machine only)')
+      .option('--project-dir <path>', 'project root for -p / --local')
+      .option('-n, --dry-run', 'show what would happen without changing anything')
+      .addHelpText('after', `\nThe previous settings file is backed up to ~/.claude/skill-manager/backups/ first.\n` + examples([
+        `skm plugin ${verb} superpowers@claude-plugins-official`,
+        `skm plugin ${verb} caveman --local`,
+        `skm plugin ${verb} atlassian notion --dry-run`,
+      ]))
+      .action(action((ctx, names, opts) => fn(ctx, names, opts), { projectDirImpliesProject: false }));
+  }
+
   program.command('trash').description('show skills removed by skill-manager (restorable)')
     .option('--empty', 'permanently delete everything in the trash')
     .option('-y, --yes', 'do not ask for confirmation')
@@ -174,6 +198,8 @@ export function buildProgram() {
     'skm list',
     'skm install anthropics/skills     # pick from a multi-skill repo',
     'skm disable some-skill',
+    'skm plugin list                   # plugins and whether each one is on',
+    'skm plugin disable superpowers',
     'skm doctor',
   ]) + `\nRun ${pc.bold('skm <command> --help')} for details on a command.\n`);
 

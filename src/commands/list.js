@@ -9,9 +9,17 @@ import { formatBytes, out, plural, scopeColor, table, tildify } from '../ui.js';
 /** Keep the end of long sources (the interesting part). */
 const clip = (s, n) => (s.length > n ? '…' + s.slice(s.length - n + 1) : s);
 
+/** Status of a plugin skill's plugin in words, e.g. "project-only (~/app)". */
+export function pluginStateText(state, projectPath) {
+  if (state === 'project-only') return `project-only (${tildify(projectPath)})`;
+  return state === 'disabled' ? 'disabled (plugin off)' : 'enabled';
+}
+
 function statusText(e) {
   if (e.kind === 'not-skill') return pc.dim('not a skill');
   if (e.kind === 'broken-link') return pc.red('broken link');
+  if (e.scope === 'plugin' && e.pluginState === 'project-only') return pc.dim(pluginStateText('project-only', e.pluginInfo.projectPath));
+  if (e.scope === 'plugin' && e.pluginState === 'disabled') return pc.yellow(pluginStateText('disabled'));
   if (e.status === 'disabled') return pc.yellow('disabled');
   if (e.override === 'off') return pc.yellow('off (settings)');
   if (e.shadowedBy) return pc.yellow('shadowed');
@@ -22,9 +30,19 @@ export function toJson(e) {
   return {
     name: e.name, dirName: e.dirName, scope: e.scope, status: e.kind === 'skill' ? e.status : e.kind,
     description: e.description, path: e.path, symlinkTarget: e.symlinkTarget || undefined,
-    plugin: e.plugin, source: e.record?.source, installedAt: e.record?.installedAt,
+    plugin: e.plugin, pluginState: e.pluginState, pluginScope: e.pluginInfo?.scope,
+    projectPath: e.pluginInfo?.projectPath || undefined, source: e.record?.source, installedAt: e.record?.installedAt,
     override: e.override || undefined, shadowedBy: e.shadowedBy || undefined, note: e.note,
   };
+}
+
+function printHidden(hidden, opts) {
+  const allHint = opts.pluginAllHint || 'use --all';
+  const countPlugins = (list) => new Set(list.map((e) => `${e.plugin}|${e.pluginInfo.projectPath || ''}`)).size;
+  if (hidden.off.length)
+    out.log(pc.dim(`+ ${plural(hidden.off.length, 'skill')} from ${plural(countPlugins(hidden.off), 'disabled plugin')} hidden (${allHint})`));
+  if (hidden.elsewhere.length)
+    out.log(pc.dim(`+ ${plural(hidden.elsewhere.length, 'skill')} from ${plural(countPlugins(hidden.elsewhere), 'plugin')} installed only for other projects hidden (${allHint})`));
 }
 
 export async function listCommand(ctx, opts) {
@@ -32,6 +50,15 @@ export async function listCommand(ctx, opts) {
   const withPlugins = Boolean(opts.plugins || opts.all);
   let entries = collect(ctx, { scopes, plugins: withPlugins });
   if (!opts.all) entries = entries.filter((e) => e.kind !== 'not-skill');
+  // Skills of plugins that are off here (or installed only for another project) stay out unless asked for.
+  const hidden = { off: [], elsewhere: [] };
+  if (withPlugins && !opts.all && !opts.disabled) {
+    for (const e of entries) {
+      if (e.scope !== 'plugin' || e.pluginState === 'enabled') continue;
+      hidden[e.pluginState === 'project-only' ? 'elsewhere' : 'off'].push(e);
+    }
+    entries = entries.filter((e) => e.scope !== 'plugin' || e.pluginState === 'enabled');
+  }
   if (opts.enabled) entries = entries.filter((e) => e.status === 'enabled');
   if (opts.disabled) entries = entries.filter((e) => e.status === 'disabled');
 
@@ -47,6 +74,7 @@ export async function listCommand(ctx, opts) {
     out.info('No skills installed yet.');
     for (const s of scopes) out.hint(`${s.scope}: ${tildify(s.skillsDir)}`);
     out.hint('Install one with "skm install <source>" or create one with "skm new <name>".');
+    printHidden(hidden, opts);
     return;
   }
 
@@ -73,10 +101,22 @@ export async function listCommand(ctx, opts) {
     out.log(pc.yellow('shadowed') + pc.dim(': a user skill with the same name takes precedence in Claude Code.'));
   if (entries.some((e) => e.override === 'off'))
     out.log(pc.yellow('off (settings)') + pc.dim(': hidden by skillOverrides in a Claude Code settings.json.'));
+  const pluginSkills = entries.filter((e) => e.kind === 'skill' && e.scope === 'plugin');
+  if (pluginSkills.length) {
+    const on = pluginSkills.filter((e) => e.pluginState === 'enabled');
+    const plugins = new Set(on.map((e) => e.plugin));
+    out.log(pc.dim(`${plural(on.length, 'plugin skill')} from ${plural(plugins.size, 'enabled plugin')}` +
+      (on.length < pluginSkills.length ? ` · ${pluginSkills.length - on.length} from plugins that are off here` : '')));
+  }
+  printHidden(hidden, opts);
+  if (entries.some((e) => e.pluginState === 'disabled'))
+    out.log(pc.yellow('disabled (plugin off)') + pc.dim(': the plugin is off in enabledPlugins; turn it on with "skm plugin enable <plugin>".'));
   if (!withPlugins && !opts.user && !opts.project) {
-    const n = scanPlugins(ctx).length;
+    const all = scanPlugins(ctx);
+    const n = all.filter((e) => e.pluginState === 'enabled').length;
     const how = opts.pluginHint || 'run "skm list --plugins"';
     if (n) out.log(pc.dim(`+ ${plural(n, 'plugin skill')} not shown (${how}).`));
+    else if (all.length) out.log(pc.dim(`+ ${plural(all.length, 'plugin skill')} from plugins that are off not shown (${how}).`));
   }
 }
 
