@@ -1,0 +1,36 @@
+{
+  "name": "skill-manager",
+  "version": "0.1.0",
+  "description": "Install, enable/disable, update and validate Claude Code skills from the command line.",
+  "type": "module",
+  "bin": {
+    "skill-manager": "bin/skm.js",
+    "skm": "bin/skm.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test --test-concurrency=4 test/",
+    "start": "node bin/skm.js"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "skills",
+    "cli"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@clack/prompts": "^1.8.1",
+    "commander": "^14.0.3",
+    "fflate": "^0.8.3",
+    "picocolors": "^1.1.1",
+    "yaml": "^2.9.1"
+  }
+}
