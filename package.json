@@ -1,7 +1,7 @@
 {
   "name": "skill-manager",
   "version": "0.1.0",
-  "description": "Install, enable/disable, update and validate Claude Code skills from the command line.",
+  "description": "List, install, enable/disable, update and validate Claude Code skills, and switch Claude Code plugins on and off, from the command line.",
   "type": "module",
   "bin": {
     "skill-manager": "bin/skm.js",
@@ -19,10 +19,20 @@
     "test": "node --test --test-concurrency=4 test/",
     "start": "node bin/skm.js"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/steveharman/skill-manager.git"
+  },
+  "homepage": "https://github.com/steveharman/skill-manager#readme",
+  "bugs": {
+    "url": "https://github.com/steveharman/skill-manager/issues"
+  },
   "keywords": [
     "claude",
     "claude-code",
     "skills",
+    "agent-skills",
+    "plugins",
     "cli"
   ],
   "license": "MIT",
