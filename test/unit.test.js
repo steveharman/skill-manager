@@ -7,7 +7,7 @@ import { createContext, findProjectRoot, userConfigDir } from '../src/context.js
 import { checkNewName, parseFrontmatter, validateSkillData } from '../src/frontmatter.js';
 import { parseSource } from '../src/sources.js';
 import { didYouMean } from '../src/ui.js';
-import { normalizeArgv } from '../src/cli.js';
+import { bareListArgs, normalizeArgv } from '../src/cli.js';
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'skm-unit-')));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -63,6 +63,14 @@ describe('scope resolution', () => {
 
   test('--project=<path> is rewritten to --project --project-dir <path>', () => {
     assert.deepEqual(normalizeArgv(['list', '--project=/x']), ['list', '--project', '--project-dir', '/x']);
+  });
+
+  test('bare list flags are rewritten to "list <flags>", anything else is left alone', () => {
+    assert.deepEqual(bareListArgs(['--plugins']), ['list', '--plugins']);
+    assert.deepEqual(bareListArgs(['--no-input', '-a', '--json']), ['--no-input', 'list', '-a', '--json']);
+    assert.deepEqual(bareListArgs(['--project-dir', '/x', '--json']), ['list', '--project-dir', '/x', '--json']);
+    for (const args of [['list', '--plugins'], ['--help'], ['-v'], ['--plugins', '--bogus'], ['--no-input'], ['doctor', '--json']])
+      assert.deepEqual(bareListArgs(args), args);
   });
 });
 

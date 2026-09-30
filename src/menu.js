@@ -60,6 +60,7 @@ export async function runMenu() {
     const where = ctx.project ? `user + project ${pc.dim(basename(ctx.project.root))}` : 'user scope (not in a project)';
     const choice = await prompt.select(`${plural(skills.length, 'skill')} · ${where}\nWhat would you like to do?`, [
       { value: 'list', label: 'List skills' },
+      { value: 'plugins', label: 'List plugin skills (read-only)' },
       { value: 'toggle', label: 'Enable / disable skills' },
       { value: 'install', label: 'Install a skill', hint: 'folder, archive, git URL, owner/repo' },
       { value: 'new', label: 'Create a new skill' },
@@ -77,7 +78,10 @@ export async function runMenu() {
       out.blank();
       switch (choice) {
         case 'list':
-          await listCommand(ctx, {});
+          await listCommand(ctx, { pluginHint: 'choose "List plugin skills" in the menu' });
+          break;
+        case 'plugins':
+          await listCommand(ctx, { plugins: true });
           break;
         case 'toggle':
           await toggleScreen(ctx);

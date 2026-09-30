@@ -75,7 +75,8 @@ export async function listCommand(ctx, opts) {
     out.log(pc.yellow('off (settings)') + pc.dim(': hidden by skillOverrides in a Claude Code settings.json.'));
   if (!withPlugins && !opts.user && !opts.project) {
     const n = scanPlugins(ctx).length;
-    if (n) out.log(pc.dim(`+ ${plural(n, 'plugin skill')} not shown (use --plugins).`));
+    const how = opts.pluginHint || 'run "skm list --plugins"';
+    if (n) out.log(pc.dim(`+ ${plural(n, 'plugin skill')} not shown (${how}).`));
   }
 }
 

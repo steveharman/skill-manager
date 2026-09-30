@@ -180,6 +180,31 @@ export function buildProgram() {
   return program;
 }
 
+/** Options `skm list` accepts; `true` means the option takes a value. */
+const LIST_FLAGS = {
+  '--json': false, '--plugins': false, '-a': false, '--all': false, '--enabled': false, '--disabled': false,
+  '-g': false, '--user': false, '-p': false, '--project': false, '--project-dir': true,
+};
+
+/**
+ * Bare list flags with no command (`skm --plugins`, `skm --json`) mean `skm list <flags>`.
+ * Returns the rewritten args, or the input unchanged when it is anything else.
+ */
+export function bareListArgs(args) {
+  const globals = [];
+  let i = 0;
+  while (args[i] === '--no-input') globals.push(args[i++]);
+  const rest = args.slice(i);
+  if (!rest.length) return args;
+  for (let j = 0; j < rest.length; j++) {
+    const a = rest[j];
+    if (a === '--no-input') continue;
+    if (!(a in LIST_FLAGS)) return args;
+    if (LIST_FLAGS[a]) j++;
+  }
+  return [...globals, 'list', ...rest];
+}
+
 export async function main(argv = process.argv) {
   const args = normalizeArgv(argv.slice(2));
   const { isInteractive } = await import('./ui.js');
@@ -196,5 +221,5 @@ export async function main(argv = process.argv) {
     buildProgram().outputHelp();
     return;
   }
-  await buildProgram().parseAsync(args, { from: 'user' });
+  await buildProgram().parseAsync(bareListArgs(args), { from: 'user' });
 }

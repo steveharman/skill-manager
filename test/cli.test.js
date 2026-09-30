@@ -75,6 +75,36 @@ describe('list', () => {
     assert.match(rm.stderr, /plugin/);
     assert.ok(existsSync(join(pluginDir, 'skills', 'pskill', 'SKILL.md')));
   });
+
+  test('hint for hidden plugin skills names the full command', () => {
+    const pluginDir = join(sb.home, '.claude', 'plugins', 'cache', 'mk', 'plug', '1.0.0');
+    writeSkill(join(pluginDir, 'skills', 'pskill'), { name: 'pskill' });
+    writeFileSync(join(sb.home, '.claude', 'plugins', 'installed_plugins.json'),
+      JSON.stringify({ version: 2, plugins: { 'plug@mk': [{ scope: 'user', installPath: pluginDir }] } }));
+    writeSkill(join(sb.userSkills, 'u1'), { name: 'u1' });
+    const r = sb.run(['list']);
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.stdout, /\+ 1 plugin skill not shown \(run "skm list --plugins"\)\./);
+  });
+
+  test('bare list flags with no command run "skm list"', () => {
+    const pluginDir = join(sb.home, '.claude', 'plugins', 'cache', 'mk', 'plug', '1.0.0');
+    writeSkill(join(pluginDir, 'skills', 'pskill'), { name: 'pskill' });
+    writeFileSync(join(sb.home, '.claude', 'plugins', 'installed_plugins.json'),
+      JSON.stringify({ version: 2, plugins: { 'plug@mk': [{ scope: 'user', installPath: pluginDir }] } }));
+    writeSkill(join(sb.userSkills, 'u1'), { name: 'u1' });
+    const plugins = sb.run(['--plugins']);
+    assert.equal(plugins.code, 0, plugins.out);
+    assert.match(plugins.stdout, /plug:pskill\s+plugin/);
+    assert.deepEqual(json(sb.run(['--json'])).map((e) => e.name), ['u1']);
+    assert.deepEqual(json(sb.run(['--no-input', '--all', '--json'])).map((e) => e.name).sort(), ['plug:pskill', 'u1']);
+    assert.deepEqual(json(sb.run(['--user', '--project-dir', sb.project, '--json'])).map((e) => e.name), ['u1']);
+    // Anything that is not purely list flags is left to commander as before.
+    const bad = sb.run(['--plugins', '--bogus']);
+    assert.equal(bad.code, 1);
+    assert.match(bad.stderr, /unknown option '--plugins'/);
+    assert.match(sb.run(['--version']).stdout, /\d+\.\d+\.\d+/);
+  });
 });
 
 describe('install', () => {
